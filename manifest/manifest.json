@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "latest_version": "0.47.1",
-  "released_at": "2026-05-12T03:24:47Z",
+  "latest_version": "0.47.3",
+  "released_at": "2026-05-10T05:19:33Z",
   "artifacts": [
     {
       "platform": "linux-x86_64",
-      "url": "https://github.com/AivoGen/guildos-release/releases/download/v0.47.1/guildos-daemon-linux-x86_64",
-      "sha256": "9eccd329f551bfa988760c93e934d05cb024535447a2e17c8fd5f3498a920ef4",
-      "size_bytes": 16661072
+      "url": "https://github.com/AivoGen/guildos-release/releases/download/v0.47.3/guildos-daemon-linux-x86_64",
+      "sha256": "7beb755be0aa279b50778b4cb9f9016f9c8b42ef704fc55fd944f6e09cfcb334",
+      "size_bytes": 16260272
     }
   ]
 }
