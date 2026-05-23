@@ -130,7 +130,7 @@ fi
 # ---- download daemon binary (skip if already installed) ----
 if [ ! -e "$DAEMON_BIN" ]; then
     DOWNLOAD_URL="https://github.com/AivoGen/guildos-release/releases/latest/download/${ASSET}"
-    TMP_BIN=$(mktemp "${TMPDIR:-/tmp}/guildos-daemon.XXXXXXXX")
+    TMP_BIN=$(mktemp "$DAEMON_DIR/daemon.tmp.XXXXXXXX")
     trap 'rm -f "$TMP_BIN"' EXIT INT TERM HUP
 
     printf 'Downloading %s ...\n' "$ASSET"
