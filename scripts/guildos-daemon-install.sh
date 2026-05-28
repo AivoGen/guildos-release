@@ -97,18 +97,34 @@ printf 'Chaining to Stage 1 (`daemon install`) ...\n'
 "$DAEMON_BIN" install
 
 # ---- post-install guidance ----
-# UI_UX msg=04058cdc copy guidance (for AddModal follow-up) confirms the
-# 3-step flow: install → login → setup. The same shape applies here so the
-# CLI operator sees the same mental model.
+# UI_UX msg=04058cdc copy guidance + UI_UX r1 msg=9b6aed4b: 3-step flow
+# (install → login → setup) with the EXACT runnable binary path so a
+# clean-host operator can copy-paste each line without translation.
+#
+# r1 (Architect amended ruling msg=fafae0c7 closing QA Gate3 BLOCK
+# msg=8008078d + Challenger Gate2 BLOCK msg=97689eb5):
+#   - Use absolute binary path `$HOME/.guildos/daemon/daemon` (install.sh
+#     does NOT touch PATH, so a bare `guildos-daemon` command does not
+#     resolve on a fresh host).
+#   - Login: bare `daemon login` per parameterless spirit (skeleton's
+#     `[machine].login_base_url = "https://guildos.ai"` is the default;
+#     operator runs `daemon login --help` to discover the override flag
+#     `--login-base-url`, which Architect ruled is NOT shown in primary
+#     guidance to keep the happy path single-line).
+#   - Setup: REQUIRES `--company-id <uuid>` per cli/commands.rs:156
+#     (`#[arg(long)] company_id: Uuid` — no default; the auto-pick
+#     follow-up is queued post-Phase-1 per PR6 Q ruling).
 cat <<'NEXT_STEPS'
 
 guildos-daemon installed. Next steps:
 
   1. Pair this machine to your Core account:
-       guildos-daemon login --base-url <core-url>
+       $HOME/.guildos/daemon/daemon login
 
-  2. Finalize the daemon registration + install the systemd user unit:
-       guildos-daemon setup
+  2. Finalize the daemon registration + install the systemd user unit
+     (replace <your-company-id> with the Company UUID from your Core
+     account; auto-pick lands in a follow-up release):
+       $HOME/.guildos/daemon/daemon setup --company-id <your-company-id>
 
   3. The daemon will start automatically once Stage 3 completes. To check:
        systemctl --user status guildos-daemon
