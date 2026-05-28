@@ -260,9 +260,25 @@ assert_contains "T1.3 curl URL points at latest" \
     "$(cat "$SANDBOX/curl_log/url")"
 assert_contains "T1.4 chains to daemon install" \
     "install" "$(cat "$SANDBOX/daemon_call_argv" 2>/dev/null || echo NONE)"
-assert_contains "T1.5 prints login next-step" \
+# r1 strict assertions per Architect msg=fafae0c7 (closing dual-BLOCK
+# from QA msg=8008078d + Challenger msg=97689eb5): printed guidance
+# must be runnable-on-clean-host. Substring matches like "guildos-daemon
+# login" false-greened r0 because they passed even when:
+#   (a) the bare name `guildos-daemon` is not on PATH (binary lives
+#       at `$HOME/.guildos/daemon/daemon`)
+#   (b) the flag `--base-url` doesn't exist (real flag is
+#       `--login-base-url`)
+#   (c) `daemon setup` required `--company-id <uuid>` was omitted.
+# These assertions lock the EXACT runnable forms.
+assert_contains "T1.5a prints login with absolute binary path" \
+    '$HOME/.guildos/daemon/daemon login' "$INSTALL_OUT"
+assert_not_contains "T1.5b login does NOT print bare guildos-daemon (not on PATH)" \
     "guildos-daemon login" "$INSTALL_OUT"
-assert_contains "T1.6 prints setup next-step" \
+assert_not_contains "T1.5c login does NOT print wrong --base-url flag" \
+    "--base-url" "$INSTALL_OUT"
+assert_contains "T1.6a prints setup with absolute path + required --company-id" \
+    '$HOME/.guildos/daemon/daemon setup --company-id' "$INSTALL_OUT"
+assert_not_contains "T1.6b setup does NOT print bare guildos-daemon (not on PATH)" \
     "guildos-daemon setup" "$INSTALL_OUT"
 assert_contains "T1.7 prints systemctl --user status guidance" \
     "systemctl --user status" "$INSTALL_OUT"
