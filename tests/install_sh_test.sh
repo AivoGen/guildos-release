@@ -188,9 +188,9 @@ assert_file_exists "T1.2 daemon binary installed at canonical path" \
     "$SANDBOX/home/.guildos/daemon/daemon"
 assert_contains "T1.3 curl URL points at latest" \
     "releases/latest/download/guildos-daemon-linux-x86_64" "$(cat "$SANDBOX/curl_log/url")"
-assert_contains "T1.4 first chains to daemon login" "login" "$(daemon_first_call)"
-assert_contains "T1.5 then chains to daemon setup" "setup" "$(daemon_calls)"
-assert_not_contains "T1.6 setup chained WITHOUT --company-id (pairing binds company)" \
+assert_eq "T1.4 chain order is exactly login then setup" "login setup" \
+    "$(awk '{print $1}' "$SANDBOX/daemon_calls" | tr '\n' ' ' | sed 's/ $//')"
+assert_not_contains "T1.5 setup chained WITHOUT --company-id (pairing binds company)" \
     "--company-id" "$(daemon_calls)"
 assert_contains "T1.7 prints one-command success message" \
     "installed, paired, and started" "$INSTALL_OUT"
@@ -231,9 +231,9 @@ plant_fake_daemon "$SANDBOX/home/.guildos/daemon"
 run_install_sh
 assert_eq "T3.1 exit code 0" "0" "$INSTALL_RC"
 assert_file_absent "T3.2 curl NOT invoked when binary present" "$SANDBOX/curl_log/INVOKED"
-assert_contains "T3.3 first chains to daemon login" "login" "$(daemon_first_call)"
-assert_contains "T3.4 then chains to daemon setup" "setup" "$(daemon_calls)"
-assert_contains "T3.5 prints skip message" "already present" "$INSTALL_OUT"
+assert_eq "T3.3 chain order is exactly login then setup" "login setup" \
+    "$(awk '{print $1}' "$SANDBOX/daemon_calls" | tr '\n' ' ' | sed 's/ $//')"
+assert_contains "T3.4 prints skip message" "already present" "$INSTALL_OUT"
 teardown_sandbox
 
 # ============================================================================
@@ -312,10 +312,11 @@ INSTALL_OUT="$(HOME="$SANDBOX/home" PATH="$(sandbox_path)" FAKE_DAEMON_FAIL_CMD=
 INSTALL_RC=$?
 set -e
 assert_eq "T7.1 exit code 0" "0" "$INSTALL_RC"
-assert_contains "T7.2 first chains to daemon login" "login" "$(daemon_first_call)"
-assert_contains "T7.3 forwards --login-base-url flag" "--login-base-url" "$(daemon_calls)"
-assert_contains "T7.4 forwards the injected origin value" "https://app.example.test" "$(daemon_calls)"
-assert_contains "T7.5 then chains to daemon setup" "setup" "$(daemon_calls)"
+assert_eq "T7.2 chain order is exactly login then setup" "login setup" \
+    "$(awk '{print $1}' "$SANDBOX/daemon_calls" | tr '\n' ' ' | sed 's/ $//')"
+assert_contains "T7.3 forwards --login-base-url flag to login" \
+    "login --login-base-url" "$(daemon_first_call)"
+assert_contains "T7.4 forwards the injected origin value" "https://app.example.test" "$(daemon_first_call)"
 teardown_sandbox
 
 # T8: unknown argument → exit 2 (a mistaken `--token ...` paste fails loud).
@@ -359,6 +360,26 @@ assert_contains "T10.3 prints reachable re-run-setup hint (absolute path)" \
     '$HOME/.guildos/daemon/daemon setup' "$INSTALL_OUT"
 assert_contains "T10.4 prints systemctl status recovery hint" \
     "systemctl --user status" "$INSTALL_OUT"
+teardown_sandbox
+
+# ============================================================================
+# T11: login failure WITH --login-base-url → re-run hint PRESERVES the origin
+# (Challenger ② C1): a non-default environment must not be sent back to the prod
+# default on retry. Asserts the exact retry command (which only appears in the
+# hint, not the chain message) carries the same origin.
+# ============================================================================
+printf '\nT11: login-failure re-run hint preserves --login-base-url\n'
+make_sandbox; make_uname_fake
+plant_fake_daemon "$SANDBOX/home/.guildos/daemon"
+set +e
+INSTALL_OUT="$(HOME="$SANDBOX/home" PATH="$(sandbox_path)" FAKE_DAEMON_FAIL_CMD="login" \
+    sh "$INSTALL_SH" --login-base-url "https://app.example.test" 2>&1)"
+INSTALL_RC=$?
+set -e
+assert_eq "T11.1 exit code 5 on login failure" "5" "$INSTALL_RC"
+assert_contains "T11.2 re-run hint is the exact retry command WITH the origin" \
+    '$HOME/.guildos/daemon/daemon login --login-base-url https://app.example.test' "$INSTALL_OUT"
+assert_not_contains "T11.3 setup NOT chained after a failed login" "setup" "$(daemon_calls)"
 teardown_sandbox
 
 # ============================================================================

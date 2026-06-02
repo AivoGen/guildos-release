@@ -140,11 +140,16 @@ fi
 login_rc=$?
 set -e
 if [ "$login_rc" -ne 0 ]; then
-    cat <<'LOGIN_FAIL'
-
-Pairing did not complete. If it timed out or the browser was closed, re-run:
-       $HOME/.guildos/daemon/daemon login
-LOGIN_FAIL
+    # Print the EXACT retry command, preserving the operator's --login-base-url
+    # so a non-default environment (testserver / self-hosted / staging) is NOT
+    # sent back to the prod default on re-run. printf keeps `$HOME` literal so
+    # the operator's shell expands it on paste.
+    printf '\nPairing did not complete. If it timed out or the browser was closed, re-run:\n' >&2
+    if [ -n "$LOGIN_BASE_URL" ]; then
+        printf '       $HOME/.guildos/daemon/daemon login --login-base-url %s\n' "$LOGIN_BASE_URL" >&2
+    else
+        printf '       $HOME/.guildos/daemon/daemon login\n' >&2
+    fi
     exit 5
 fi
 
