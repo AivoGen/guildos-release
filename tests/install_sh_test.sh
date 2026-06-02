@@ -210,8 +210,8 @@ ORIG_PATH="$PATH"
 # T1: happy path — fresh install, binary absent
 #   - downloads from canonical `latest` URL
 #   - atomic install via mktemp+mv (no .tmp.* leftover)
-#   - chains to `daemon install` (foreground)
-#   - prints 3-step next-step guidance (login → setup → systemctl status)
+#   - chains to `daemon login` (foreground)
+#   - prints next-step guidance (setup → systemctl status + re-run-login hint)
 # ============================================================================
 printf '\nT1: happy path (fresh install, latest tag)\n'
 make_sandbox
@@ -258,8 +258,8 @@ assert_file_exists "T1.2 daemon binary installed at canonical path" \
 assert_contains "T1.3 curl URL points at latest" \
     "releases/latest/download/guildos-daemon-linux-x86_64" \
     "$(cat "$SANDBOX/curl_log/url")"
-assert_contains "T1.4 chains to daemon install" \
-    "install" "$(cat "$SANDBOX/daemon_call_argv" 2>/dev/null || echo NONE)"
+assert_contains "T1.4 chains to daemon login" \
+    "login" "$(cat "$SANDBOX/daemon_call_argv" 2>/dev/null || echo NONE)"
 # r1 strict assertions per Architect msg=fafae0c7 (closing dual-BLOCK
 # from QA msg=8008078d + Challenger msg=97689eb5): printed guidance
 # must be runnable-on-clean-host. Substring matches like "guildos-daemon
@@ -341,7 +341,7 @@ teardown_sandbox
 # ============================================================================
 # T3: idempotency — binary already present
 #   - skips curl entirely
-#   - still chains to `daemon install` (idempotency owner)
+#   - still chains to `daemon login`
 # ============================================================================
 printf '\nT3: idempotency (binary already present)\n'
 make_sandbox
@@ -361,8 +361,8 @@ run_install_sh
 assert_eq "T3.1 exit code 0" "0" "$INSTALL_RC"
 assert_file_absent "T3.2 curl NOT invoked when binary present" \
     "$SANDBOX/curl_log/INVOKED"
-assert_contains "T3.3 still chains to daemon install (idempotency)" \
-    "install" "$(cat "$SANDBOX/daemon_call_argv" 2>/dev/null || echo NONE)"
+assert_contains "T3.3 still chains to daemon login (idempotency)" \
+    "login" "$(cat "$SANDBOX/daemon_call_argv" 2>/dev/null || echo NONE)"
 assert_contains "T3.4 prints skip message" \
     "already present" "$INSTALL_OUT"
 teardown_sandbox
@@ -405,7 +405,7 @@ assert_not_contains "T4.8 no daemon.pid PID-file check" \
     "daemon.pid" "$code_only"
 
 # ============================================================================
-# T5: download failure → non-zero exit, no chain to daemon install
+# T5: download failure → non-zero exit, no chain to daemon login
 # ============================================================================
 printf '\nT5: download failure exits non-zero\n'
 make_sandbox
@@ -424,7 +424,7 @@ run_install_sh
 assert_eq "T5.1 exit code 4 on download failure" "4" "$INSTALL_RC"
 assert_file_absent "T5.2 no daemon binary at canonical path" \
     "$SANDBOX/home/.guildos/daemon/daemon"
-assert_file_absent "T5.3 daemon install NOT chained" \
+assert_file_absent "T5.3 daemon login NOT chained" \
     "$SANDBOX/daemon_call_argv"
 assert_contains "T5.4 download failure error message" \
     "download failed" "$INSTALL_OUT"
@@ -453,6 +453,39 @@ assert_file_absent "T6.2 curl NOT invoked on platform reject" \
     "$SANDBOX/curl_log/INVOKED"
 assert_contains "T6.3 platform error message" \
     "unsupported platform" "$INSTALL_OUT"
+teardown_sandbox
+
+# ============================================================================
+# T7: --login-base-url is parsed + forwarded to `daemon login` (#1748 P0 web
+# command injects it). Pre-plant recorder so binary-present gate skips download.
+# ============================================================================
+printf '\nT7: --login-base-url forwarded to daemon login\n'
+make_sandbox
+make_uname_fake
+plant_fake_daemon "$SANDBOX/home/.guildos/daemon"
+set +e
+INSTALL_OUT="$(HOME="$SANDBOX/home" PATH="$(sandbox_path)" \
+    sh "$INSTALL_SH" --login-base-url "https://app.example.test" 2>&1)"
+INSTALL_RC=$?
+set -e
+recorded="$(cat "$SANDBOX/daemon_call_argv" 2>/dev/null || echo NONE)"
+assert_eq "T7.1 exit code 0" "0" "$INSTALL_RC"
+assert_contains "T7.2 chains to daemon login" "login" "$recorded"
+assert_contains "T7.3 forwards --login-base-url flag" "--login-base-url" "$recorded"
+assert_contains "T7.4 forwards the injected origin value" "https://app.example.test" "$recorded"
+teardown_sandbox
+
+# T8: unknown argument → exit 2 (a mistaken `--token ...` paste fails loud).
+printf '\nT8: unknown argument exits 2\n'
+make_sandbox
+set +e
+INSTALL_OUT="$(HOME="$SANDBOX/home" PATH="$(sandbox_path)" \
+    sh "$INSTALL_SH" --token sekret 2>&1)"
+INSTALL_RC=$?
+set -e
+assert_eq "T8.1 exit code 2 on unknown argument" "2" "$INSTALL_RC"
+assert_contains "T8.2 prints unknown-argument error" "unknown argument" "$INSTALL_OUT"
+assert_file_absent "T8.3 login NOT chained when args rejected" "$SANDBOX/daemon_call_argv"
 teardown_sandbox
 
 # ============================================================================

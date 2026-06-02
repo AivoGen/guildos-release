@@ -1,37 +1,66 @@
 #!/bin/sh
 # guildos-daemon-install.sh — POSIX shell installer for GuildOS daemon
 #
-# task #1344 PR8 (Architect dispatch msg=3b64e576 + scope ruling msg=03ae05ce):
-# download-only wrapper for the new 3-stage daemon lifecycle (design v2.5 §11.3).
-# This script replaces the legacy `daemon run --install-only` bootstrap path
-# (retired by PR7 [ref:1d8c1afd] cli/run.rs simplification).
+# task #1748 P1 (Architect dispatch msg=205702cc): migrate the install chain to
+# the login→setup lifecycle. The former Stage-1 `daemon install` subcommand was
+# folded into `daemon login` (#1746 — login now self-bootstraps the machine
+# identity), so this script downloads the binary then chains straight to
+# `daemon login`. The previous chain target (`daemon install`) no longer exists
+# on the daemon and would error out.
 #
-# Phase 1 backbone (#1344) split lifecycle into three operator-driven stages:
+# Lifecycle (design daemon-onboarding-login-setup.md §4.3 / §5):
 #
-#   Stage 1 — `daemon install`  (this script chains to it)
-#       Writes the skeleton config at `~/.guildos/daemon/config.toml`
-#       (no creds yet — just paths + runtime defaults). Idempotent.
+#   download (this script)
+#       Fetches the daemon binary into `~/.guildos/daemon/daemon`. Idempotent.
 #
-#   Stage 2 — `daemon login`    (operator runs themselves)
-#       Pairs the machine to a Core account via /init+/complete+/poll.
-#       Writes the daemon_token plaintext into `[core]` block of config.
+#   Stage 1 — `daemon login [--login-base-url <url>]`  (this script chains to it)
+#       Self-bootstraps the machine identity, prints the browser approval URL
+#       (`<base>/pair?m=&n=`), and polls `/api/login/poll` until the operator
+#       approves + picks a company in the browser. Persists the paired `[core]`
+#       credentials.
 #
-#   Stage 3 — `daemon setup`    (operator runs themselves)
-#       Hashes daemon_token, calls /api/setup/finalize, installs the
-#       systemd user-unit, runs `systemctl --user enable --now`.
+#   Stage 2 — `daemon setup --company-id <uuid>`  (operator runs themselves)
+#       Calls `/api/setup/finalize`, installs + enables the systemd user unit.
 #
-# This script is intentionally PARAMETERLESS (per Hoping dm:a9e6bb9e +
-# dm:e34cda7c, re-confirmed Architect msg=03ae05ce Q1):
-#   - Token + core URL do NOT transit through shell argv (security win;
-#     legacy `--token <api_token>` was visible in process listings).
-#   - One-command paste: `curl -fL <url> | sh`
-#   - Post-install guidance points operator at `daemon login` for pairing.
+# Argv contract (security): NO secrets in argv. The ONLY accepted flag is the
+# OPTIONAL, non-secret `--login-base-url <url>` — injected by the web "Add
+# machine" command (#1748 P0) so the daemon points its pairing flow at the same
+# origin the operator is signed into. Token + core URL never transit argv (the
+# legacy `--token <api_token>` was visible in process listings). When the flag
+# is omitted, `daemon login` falls back to the skeleton config default
+# (`[machine].login_base_url = "https://guildos.ai"`).
 #
 # Env overrides (NON-DEFAULT test path; production uses `latest`):
 #   GUILDOS_DAEMON_RELEASE_TAG  — pin a specific release tag (default `latest`).
 #                                 e.g. `GUILDOS_DAEMON_RELEASE_TAG=v0.60.0 sh install.sh`
 
 set -eu
+
+# ---- argv parse (only the optional, non-secret --login-base-url) ----
+# Accepting one public URL flag does NOT reintroduce the secret-in-argv problem
+# the parameterless contract guarded against — the login base is a public
+# origin, not a credential.
+LOGIN_BASE_URL=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --login-base-url)
+            shift
+            [ $# -gt 0 ] || {
+                printf 'error: --login-base-url requires a value\n' >&2
+                exit 2
+            }
+            LOGIN_BASE_URL="$1"
+            ;;
+        --login-base-url=*)
+            LOGIN_BASE_URL="${1#--login-base-url=}"
+            ;;
+        *)
+            printf 'error: unknown argument: %s (only --login-base-url is accepted)\n' "$1" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
 
 # ---- platform detect (Phase 1 = Linux x86_64 only per design §4.6.9) ----
 UNAME_S=$(uname -s)
@@ -57,7 +86,7 @@ chmod 700 "$DAEMON_DIR"
 # ---- release tag selection (latest by default; env override for test) ----
 # Architect Q2 ruling msg=03ae05ce: latest default, GUILDOS_DAEMON_RELEASE_TAG
 # env override for test/dogfood. Don't fold pin into argv — violates the
-# parameterless contract from Q1.
+# no-secrets-in-argv contract.
 RELEASE_TAG="${GUILDOS_DAEMON_RELEASE_TAG:-latest}"
 if [ "$RELEASE_TAG" = "latest" ]; then
     DOWNLOAD_URL="https://github.com/AivoGen/guildos-release/releases/latest/download/${ASSET}"
@@ -67,9 +96,8 @@ fi
 
 # ---- binary-presence idempotency gate (Architect Q4 ruling msg=03ae05ce) ----
 # Skip download iff the canonical binary is already present. We do NOT inspect
-# systemd / PID / pgrep here — the legacy 3-way "already running" check moved
-# to `daemon install` (config idempotency) + `daemon setup` (systemd lifecycle).
-# Rationale: install.sh has no service-manager concerns in the new model.
+# systemd / PID / pgrep here — service-manager concerns live in `daemon setup`
+# (systemd lifecycle); `daemon login` is idempotent on the machine identity.
 if [ -e "$DAEMON_BIN" ]; then
     printf 'Daemon binary already present at %s — skipping download.\n' "$DAEMON_BIN"
 else
@@ -88,45 +116,44 @@ else
     printf 'Installed daemon to %s\n' "$DAEMON_BIN"
 fi
 
-# ---- chain into Stage 1 (`daemon install`) ----
-# Architect Q3 ruling msg=03ae05ce: FOREGROUND call (not exec, not print-only).
-# Foreground lets install.sh remain the parent + print final guidance after
-# Stage 1 completes. `daemon install` writes the skeleton config + runtime
-# defaults; it does NOT pair or start the daemon — those are Stages 2 + 3.
-printf 'Chaining to Stage 1 (`daemon install`) ...\n'
-"$DAEMON_BIN" install
+# ---- chain into Stage 1 (`daemon login`) ----
+# The former `daemon install` (skeleton-config) step was folded into
+# `daemon login` (#1746): login self-bootstraps the identity, then pairs. We
+# call login in the FOREGROUND (Architect Q3 ruling msg=03ae05ce) so install.sh
+# stays the parent and prints the Stage-2 guidance after pairing completes.
+# Forward the operator's `--login-base-url` when the web command injected one;
+# otherwise `daemon login` uses the skeleton config default.
+if [ -n "$LOGIN_BASE_URL" ]; then
+    printf 'Chaining to Stage 1 (`daemon login --login-base-url %s`) ...\n' "$LOGIN_BASE_URL"
+    "$DAEMON_BIN" login --login-base-url "$LOGIN_BASE_URL"
+else
+    printf 'Chaining to Stage 1 (`daemon login`) ...\n'
+    "$DAEMON_BIN" login
+fi
 
-# ---- post-install guidance ----
-# UI_UX msg=04058cdc copy guidance + UI_UX r1 msg=9b6aed4b: 3-step flow
-# (install → login → setup) with the EXACT runnable binary path so a
-# clean-host operator can copy-paste each line without translation.
-#
-# r1 (Architect amended ruling msg=fafae0c7 closing QA Gate3 BLOCK
-# msg=8008078d + Challenger Gate2 BLOCK msg=97689eb5):
-#   - Use absolute binary path `$HOME/.guildos/daemon/daemon` (install.sh
-#     does NOT touch PATH, so a bare `guildos-daemon` command does not
-#     resolve on a fresh host).
-#   - Login: bare `daemon login` per parameterless spirit (skeleton's
-#     `[machine].login_base_url = "https://guildos.ai"` is the default;
-#     operator runs `daemon login --help` to discover the override flag
-#     `--login-base-url`, which Architect ruled is NOT shown in primary
-#     guidance to keep the happy path single-line).
-#   - Setup: REQUIRES `--company-id <uuid>` per cli/commands.rs:156
-#     (`#[arg(long)] company_id: Uuid` — no default; the auto-pick
-#     follow-up is queued post-Phase-1 per PR6 Q ruling).
+# ---- post-login guidance ----
+# UI_UX copy guidance: print the EXACT runnable binary path so a clean-host
+# operator can copy-paste without translation. Login already ran (chained
+# above); the only remaining operator step is `daemon setup`. A re-run hint is
+# included for the timeout / closed-browser case.
+#   - Use absolute binary path `$HOME/.guildos/daemon/daemon` (install.sh does
+#     NOT touch PATH, so a bare `guildos-daemon` does not resolve on a fresh
+#     host).
+#   - Setup REQUIRES `--company-id <uuid>` per cli/commands.rs (no default; the
+#     single-membership auto-pick is queued post-Phase-1).
 cat <<'NEXT_STEPS'
 
-guildos-daemon installed. Next steps:
+guildos-daemon paired. Final step:
 
-  1. Pair this machine to your Core account:
-       $HOME/.guildos/daemon/daemon login
-
-  2. Finalize the daemon registration + install the systemd user unit
+  1. Finalize the daemon registration + install the systemd user unit
      (replace <your-company-id> with the Company UUID from your Core
      account; auto-pick lands in a follow-up release):
        $HOME/.guildos/daemon/daemon setup --company-id <your-company-id>
 
-  3. The daemon will start automatically once Stage 3 completes. To check:
+  2. The daemon starts automatically once setup completes. To check:
        systemctl --user status guildos-daemon
+
+If pairing did not finish (timeout or closed browser), re-run:
+       $HOME/.guildos/daemon/daemon login
 
 NEXT_STEPS
