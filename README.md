@@ -19,18 +19,28 @@ shipped as a release artifact). Decoupled so the installer's
 lifecycle is independent of GuildOS core/UI release cadence — it's a
 shell script, not a versioned binary.
 
-The PRIVATE-side `tools/deploy.sh::cut_public_release` fetches this
-script at a PINNED commit SHA via raw.githubusercontent.com (NOT
-floating `main`) when building each PUBLIC release on this repo. The
-pin lives in `AivoGen/guildos:tools/deploy.sh`; bumping it is an
-explicit cross-repo step rather than a "main moved" race.
+The PRIVATE-side release pipeline fetches this script at a PINNED commit
+SHA via raw.githubusercontent.com (NOT floating `main`) when building each
+PUBLIC release on this repo. The pin lives in
+`AivoGen/guildos:tools/deploy_install_sh_pin.sh`
+(`GUILDOS_RELEASE_INSTALL_SH_PIN` + `_SHA256`); bumping it is an explicit
+cross-repo step rather than a "main moved" race.
 
 End-user install flow (from the GuildOS UI's "Add Machine" modal):
 
 ```sh
 curl -fL https://github.com/AivoGen/guildos-release/releases/latest/download/guildos-daemon-install.sh \
-  | bash -s -- --token <api_token> --core-url <core_ws_url>
+  | bash -s -- --login-base-url <your_guildos_origin>
 ```
+
+The command is **tokenless** (#1748): no `--token` / `--core-url` ever
+transit shell argv. The script downloads the daemon binary then chains to
+`daemon login`, which prints a browser approval URL (`<base>/pair?m=&n=`)
+and polls until you approve + pick a company. The only accepted flag is the
+optional, non-secret `--login-base-url <origin>` — the "Add Machine" modal
+injects your current origin so pairing targets the right environment; when
+omitted it defaults to `https://guildos.ai`. After pairing, run the printed
+`daemon setup --company-id <uuid>` to finalize + install the systemd unit.
 
 The `releases/latest/download/` URL keeps end-users on the version
 the most recent PUBLIC release bundled in (per-release frozen copy),
