@@ -33,14 +33,19 @@ curl -fL https://github.com/AivoGen/guildos-release/releases/latest/download/gui
   | bash -s -- --login-base-url <your_guildos_origin>
 ```
 
-The command is **tokenless** (#1748): no `--token` / `--core-url` ever
-transit shell argv. The script downloads the daemon binary then chains to
-`daemon login`, which prints a browser approval URL (`<base>/pair?m=&n=`)
-and polls until you approve + pick a company. The only accepted flag is the
-optional, non-secret `--login-base-url <origin>` — the "Add Machine" modal
-injects your current origin so pairing targets the right environment; when
-omitted it defaults to `https://guildos.ai`. After pairing, run the printed
-`daemon setup --company-id <uuid>` to finalize + install the systemd unit.
+The command is **tokenless** and completes onboarding in **one step**
+(#1748): no `--token` / `--core-url` ever transit shell argv. The script
+downloads the daemon binary then chains `daemon login` → `daemon setup` in
+the foreground — `login` prints a browser approval URL (`<base>/pair?m=&n=`)
+and polls until you approve + pick a company in the browser; `setup` then
+finalizes against the company you chose at approval (no company UUID to type)
+and installs/starts the systemd unit, so the machine comes online and the
+"Add Machine" modal advances to "✓ connected". The only accepted flag is the
+optional, non-secret `--login-base-url <origin>` — the modal injects your
+current origin so pairing targets the right environment; when omitted it
+defaults to `https://guildos.ai`. If a stage doesn't complete (pairing
+timeout, setup error) the script prints the exact re-run command and exits
+non-zero.
 
 The `releases/latest/download/` URL keeps end-users on the version
 the most recent PUBLIC release bundled in (per-release frozen copy),
