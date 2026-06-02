@@ -47,14 +47,21 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --login-base-url)
             shift
-            [ $# -gt 0 ] || {
-                printf 'error: --login-base-url requires a value\n' >&2
+            # Require a present AND non-empty value: an explicit but empty
+            # `--login-base-url ""` must NOT be silently swallowed into the
+            # default origin (same silent-misdirection class as the retry hint).
+            { [ $# -gt 0 ] && [ -n "$1" ]; } || {
+                printf 'error: --login-base-url requires a non-empty value\n' >&2
                 exit 2
             }
             LOGIN_BASE_URL="$1"
             ;;
         --login-base-url=*)
             LOGIN_BASE_URL="${1#--login-base-url=}"
+            [ -n "$LOGIN_BASE_URL" ] || {
+                printf 'error: --login-base-url requires a non-empty value\n' >&2
+                exit 2
+            }
             ;;
         *)
             printf 'error: unknown argument: %s (only --login-base-url is accepted)\n' "$1" >&2

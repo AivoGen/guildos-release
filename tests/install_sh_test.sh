@@ -383,6 +383,26 @@ assert_not_contains "T11.3 setup NOT chained after a failed login" "setup" "$(da
 teardown_sandbox
 
 # ============================================================================
+# T12: empty --login-base-url (both forms) fails loud — an explicit-but-empty
+# flag must NOT be silently swallowed into the default origin (Gemini MEDIUM,
+# same silent-misdirection class as C1).
+# ============================================================================
+printf '\nT12: empty --login-base-url exits 2\n'
+make_sandbox
+set +e
+OUT_SPACE="$(HOME="$SANDBOX/home" PATH="$(sandbox_path)" sh "$INSTALL_SH" --login-base-url "" 2>&1)"
+rc_space=$?
+OUT_EQ="$(HOME="$SANDBOX/home" PATH="$(sandbox_path)" sh "$INSTALL_SH" --login-base-url= 2>&1)"
+rc_eq=$?
+set -e
+assert_eq "T12.1 space-form empty value → exit 2" "2" "$rc_space"
+assert_eq "T12.2 equals-form empty value → exit 2" "2" "$rc_eq"
+assert_contains "T12.3 space-form prints non-empty-value error" "non-empty value" "$OUT_SPACE"
+assert_contains "T12.4 equals-form prints non-empty-value error" "non-empty value" "$OUT_EQ"
+assert_file_absent "T12.5 nothing chained on empty value" "$SANDBOX/daemon_calls"
+teardown_sandbox
+
+# ============================================================================
 # Summary
 # ============================================================================
 printf '\n----\n'
