@@ -430,6 +430,20 @@ assert_file_absent "T12.5 nothing chained on empty value" "$SANDBOX/daemon_calls
 teardown_sandbox
 
 # ============================================================================
+# T13: Windows installer static guards. These scripts cannot execute on this
+# Linux CI host, but the static failure classes are contractual.
+# ============================================================================
+printf '\nT13: Windows installer static guards\n'
+PS1_BODY="$(cat scripts/guildos-daemon-install.ps1)"
+BAT_BODY="$(cat scripts/guildos-daemon-install.bat)"
+assert_contains "T13.1 PS1 enables TLS 1.2" "Tls12" "$PS1_BODY"
+assert_not_contains "T13.2 PS1 avoids RuntimeInformation for PowerShell 5.1" "RuntimeInformation" "$PS1_BODY"
+assert_not_contains "T13.3 PS1 does not use Write-Error before explicit exits" "Write-Error" "$PS1_BODY"
+assert_contains "T13.4 PS1 downloads are terminating" "-ErrorAction Stop" "$PS1_BODY"
+assert_contains "T13.5 BAT bootstrap enables TLS 1.2" "Tls12" "$BAT_BODY"
+assert_contains "T13.6 BAT bootstrap download is terminating" "-ErrorAction Stop" "$BAT_BODY"
+
+# ============================================================================
 # Summary
 # ============================================================================
 printf '\n----\n'
