@@ -1,4 +1,5 @@
 param(
+    [Alias('login-base-url')]
     [string]$LoginBaseUrl = ""
 )
 

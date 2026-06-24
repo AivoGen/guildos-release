@@ -440,8 +440,10 @@ assert_contains "T13.1 PS1 enables TLS 1.2" "Tls12" "$PS1_BODY"
 assert_not_contains "T13.2 PS1 avoids RuntimeInformation for PowerShell 5.1" "RuntimeInformation" "$PS1_BODY"
 assert_not_contains "T13.3 PS1 does not use Write-Error before explicit exits" "Write-Error" "$PS1_BODY"
 assert_contains "T13.4 PS1 downloads are terminating" "-ErrorAction Stop" "$PS1_BODY"
-assert_contains "T13.5 BAT bootstrap enables TLS 1.2" "Tls12" "$BAT_BODY"
-assert_contains "T13.6 BAT bootstrap download is terminating" "-ErrorAction Stop" "$BAT_BODY"
+assert_contains "T13.5 PS1 accepts kebab-case login-base-url alias" "Alias('login-base-url')" "$PS1_BODY"
+assert_contains "T13.6 BAT transparently forwards installer arguments to PS1" "%*" "$BAT_BODY"
+assert_contains "T13.7 BAT bootstrap enables TLS 1.2" "Tls12" "$BAT_BODY"
+assert_contains "T13.8 BAT bootstrap download is terminating" "-ErrorAction Stop" "$BAT_BODY"
 
 # ============================================================================
 # Summary
