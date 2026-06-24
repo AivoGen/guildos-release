@@ -53,14 +53,27 @@ UNAME_EOF
     chmod +x "$SANDBOX/bin/uname"
 }
 
-# Fake `uname` for an unsupported platform (forces exit 3).
-make_uname_unsupported() {
+# Fake `uname` for macOS arm64.
+make_uname_macos_arm64() {
     cat >"$SANDBOX/bin/uname" <<'UNAME_EOF'
 #!/bin/sh
 case "$1" in
     -s) printf 'Darwin\n' ;;
     -m) printf 'arm64\n' ;;
     *)  printf 'Darwin\n' ;;
+esac
+UNAME_EOF
+    chmod +x "$SANDBOX/bin/uname"
+}
+
+# Fake `uname` for an unsupported platform (forces exit 3).
+make_uname_unsupported() {
+    cat >"$SANDBOX/bin/uname" <<'UNAME_EOF'
+#!/bin/sh
+case "$1" in
+    -s) printf 'FreeBSD\n' ;;
+    -m) printf 'riscv64\n' ;;
+    *)  printf 'FreeBSD\n' ;;
 esac
 UNAME_EOF
     chmod +x "$SANDBOX/bin/uname"
@@ -283,9 +296,23 @@ assert_eq "T5.5 no leftover daemon.tmp.* on download failure" "" "$leftover_tmp"
 teardown_sandbox
 
 # ============================================================================
-# T6: unsupported platform → exit 3, no download attempted
+# T6: macOS downloads darwin asset, chains login, and does not call setup
 # ============================================================================
-printf '\nT6: unsupported platform (Darwin/arm64) exits 3\n'
+printf '\nT6: macOS arm64 foreground login variant\n'
+make_sandbox; make_uname_macos_arm64; make_curl_planter
+run_install_sh
+assert_eq "T6.1 exit code 0" "0" "$INSTALL_RC"
+assert_contains "T6.2 curl URL points at darwin-arm64 asset" \
+    "releases/latest/download/guildos-daemon-darwin-arm64" "$(cat "$SANDBOX/curl_log/url")"
+assert_eq "T6.3 chain order is login only" "login" \
+    "$(awk '{print $1}' "$SANDBOX/daemon_calls" | tr '\n' ' ' | sed 's/ $//')"
+assert_contains "T6.4 prints foreground run guidance" "daemon run" "$INSTALL_OUT"
+teardown_sandbox
+
+# ============================================================================
+# T6b: unsupported platform → exit 3, no download attempted
+# ============================================================================
+printf '\nT6b: unsupported platform exits 3\n'
 make_sandbox; make_uname_unsupported
 cat >"$SANDBOX/bin/curl" <<CURL_EOF
 #!/bin/sh
@@ -294,9 +321,9 @@ exit 0
 CURL_EOF
 chmod +x "$SANDBOX/bin/curl"
 run_install_sh
-assert_eq "T6.1 exit code 3 on unsupported platform" "3" "$INSTALL_RC"
-assert_file_absent "T6.2 curl NOT invoked on platform reject" "$SANDBOX/curl_log/INVOKED"
-assert_contains "T6.3 platform error message" "unsupported platform" "$INSTALL_OUT"
+assert_eq "T6b.1 exit code 3 on unsupported platform" "3" "$INSTALL_RC"
+assert_file_absent "T6b.2 curl NOT invoked on platform reject" "$SANDBOX/curl_log/INVOKED"
+assert_contains "T6b.3 platform error message" "unsupported platform" "$INSTALL_OUT"
 teardown_sandbox
 
 # ============================================================================

@@ -19,10 +19,14 @@
 #       approves + picks a company in the browser. Persists the paired `[core]`
 #       credentials.
 #
-#   Stage 2 — `daemon setup`  (this script chains to it — NO `--company-id`)
+#   Stage 2 — Linux `daemon setup`  (this script chains to it — NO `--company-id`)
 #       Calls `/api/setup/finalize` (which binds the company chosen at approval
 #       time, #1748 P1 A) + installs/starts the systemd user unit → machine
 #       online. The operator never types a company UUID.
+#
+#   macOS currently stops after `daemon login` and prints the foreground
+#       `daemon run` command. LaunchAgent service management is intentionally
+#       not implied until the daemon implements that setup path.
 #
 # Argv contract (security): NO secrets in argv. The ONLY accepted flag is the
 # OPTIONAL, non-secret `--login-base-url <url>` — injected by the web "Add
@@ -71,15 +75,23 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-# ---- platform detect (Phase 1 = Linux x86_64 only per design §4.6.9) ----
+# ---- platform detect ----
 UNAME_S=$(uname -s)
 UNAME_M=$(uname -m)
+RUN_SETUP=0
 case "${UNAME_S}-${UNAME_M}" in
     Linux-x86_64)
         ASSET="guildos-daemon-linux-x86_64"
+        RUN_SETUP=1
+        ;;
+    Darwin-arm64|Darwin-aarch64)
+        ASSET="guildos-daemon-darwin-arm64"
+        ;;
+    Darwin-x86_64)
+        ASSET="guildos-daemon-darwin-x86_64"
         ;;
     *)
-        printf 'unsupported platform: %s-%s (Phase 1 supports Linux x86_64 only)\n' \
+        printf 'unsupported platform: %s-%s (supports Linux x86_64, macOS arm64, macOS x86_64)\n' \
             "$UNAME_S" "$UNAME_M" >&2
         exit 3
         ;;
@@ -125,13 +137,15 @@ else
     printf 'Installed daemon to %s\n' "$DAEMON_BIN"
 fi
 
-# ---- chain Stage 1 (`daemon login`) then Stage 2 (`daemon setup`) ----
+# ---- chain Stage 1 (`daemon login`) then Linux Stage 2 (`daemon setup`) ----
 # The former `daemon install` (skeleton-config) step was folded into
 # `daemon login` (#1746): login self-bootstraps the identity, then pairs. We run
 # login + setup in the FOREGROUND (Architect Q3 ruling msg=03ae05ce) so the
-# operator completes onboarding in ONE command — pair in the browser, then setup
-# finalizes + installs the systemd unit and the machine comes online (so the web
-# "Add machine" modal can auto-advance to "✓ connected").
+# operator completes Linux onboarding in ONE command — pair in the browser, then
+# setup finalizes + installs the systemd unit and the machine comes online (so
+# the web "Add machine" modal can auto-advance to "connected"). macOS does not
+# expose daemon setup yet, so the script fails open only by printing the
+# foreground run command after login succeeds.
 #
 # Each stage runs under `set +e` + an explicit exit-code check: under `set -e` a
 # non-zero stage would abort on that line BEFORE its recovery hint could print,
@@ -158,6 +172,20 @@ if [ "$login_rc" -ne 0 ]; then
         printf '       $HOME/.guildos/daemon/daemon login\n' >&2
     fi
     exit 5
+fi
+
+if [ "$RUN_SETUP" -ne 1 ]; then
+    cat <<'MAC_NEXT_STEPS'
+
+guildos-daemon installed and paired.
+
+Start it in this terminal with:
+       $HOME/.guildos/daemon/daemon run
+
+Keep that process running to maintain the machine connection.
+
+MAC_NEXT_STEPS
+    exit 0
 fi
 
 # Stage 2: `daemon setup` WITHOUT `--company-id`. #1748 P1 (A): the company is
