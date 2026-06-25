@@ -296,17 +296,20 @@ assert_eq "T5.5 no leftover daemon.tmp.* on download failure" "" "$leftover_tmp"
 teardown_sandbox
 
 # ============================================================================
-# T6: macOS downloads darwin asset, chains login, and does not call setup
+# T6: macOS downloads darwin asset, chains login then setup, then prints the
+# finalized foreground fallback. This prevents the paired-token `run` path.
 # ============================================================================
-printf '\nT6: macOS arm64 foreground login variant\n'
+printf '\nT6: macOS arm64 finalize-before-run variant\n'
 make_sandbox; make_uname_macos_arm64; make_curl_planter
 run_install_sh
 assert_eq "T6.1 exit code 0" "0" "$INSTALL_RC"
 assert_contains "T6.2 curl URL points at darwin-arm64 asset" \
     "releases/latest/download/guildos-daemon-darwin-arm64" "$(cat "$SANDBOX/curl_log/url")"
-assert_eq "T6.3 chain order is login only" "login" \
+assert_eq "T6.3 chain order is exactly login then setup" "login setup" \
     "$(awk '{print $1}' "$SANDBOX/daemon_calls" | tr '\n' ' ' | sed 's/ $//')"
-assert_contains "T6.4 prints foreground run guidance" "daemon run" "$INSTALL_OUT"
+assert_contains "T6.4 prints finalized success before foreground run guidance" \
+    "installed, paired, and finalized" "$INSTALL_OUT"
+assert_contains "T6.5 prints foreground run guidance only after setup succeeded" "daemon run" "$INSTALL_OUT"
 teardown_sandbox
 
 # ============================================================================
@@ -386,6 +389,20 @@ assert_contains "T10.2 login chained before setup failure" "login" "$(daemon_fir
 assert_contains "T10.3 prints reachable re-run-setup hint (absolute path)" \
     '$HOME/.guildos/daemon/daemon setup' "$INSTALL_OUT"
 assert_contains "T10.4 prints systemctl status recovery hint" \
+    "systemctl --user status" "$INSTALL_OUT"
+teardown_sandbox
+
+# T10b: macOS setup failure prints setup retry but no Linux service guidance.
+printf '\nT10b: macOS setup failure prints finalize retry only\n'
+make_sandbox; make_uname_macos_arm64
+plant_fake_daemon "$SANDBOX/home/.guildos/daemon"
+FAKE_DAEMON_FAIL_CMD="setup"; run_install_sh; FAKE_DAEMON_FAIL_CMD=""
+assert_eq "T10b.1 exit code 6 on setup failure" "6" "$INSTALL_RC"
+assert_eq "T10b.2 macOS chains login then setup before failing" "login setup" \
+    "$(awk '{print $1}' "$SANDBOX/daemon_calls" | tr '\n' ' ' | sed 's/ $//')"
+assert_contains "T10b.3 prints reachable setup retry" \
+    '$HOME/.guildos/daemon/daemon setup' "$INSTALL_OUT"
+assert_not_contains "T10b.4 macOS setup failure does not print systemctl" \
     "systemctl --user status" "$INSTALL_OUT"
 teardown_sandbox
 
