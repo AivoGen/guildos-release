@@ -69,13 +69,17 @@ if ($LASTEXITCODE -ne 0) {
     Fail-WithExit "Pairing did not complete. Re-run: `"$daemonBin`" login $($loginArgs -join ' ')" 5
 }
 
+Write-Host "Chaining to Stage 2 (daemon setup) ..."
+& $daemonBin setup --daemon-binary $daemonBin
+if ($LASTEXITCODE -ne 0) {
+    Fail-WithExit "Setup did not complete. Re-run from an elevated terminal: `"$daemonBin`" setup --daemon-binary `"$daemonBin`"" 6
+}
+
 @"
 
-guildos-daemon installed and paired.
+guildos-daemon installed, paired, and started.
 
-Start it in this terminal with:
-       "$daemonBin" run
-
-Keep that process running to maintain the machine connection.
+Check the service any time with:
+       sc.exe query GuildOSDaemon
 
 "@ | Write-Host
