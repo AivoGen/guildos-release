@@ -19,14 +19,12 @@
 #       approves + picks a company in the browser. Persists the paired `[core]`
 #       credentials.
 #
-#   Stage 2 — Linux `daemon setup`  (this script chains to it — NO `--company-id`)
+#   Stage 2 — `daemon setup`  (this script chains to it — NO `--company-id`)
 #       Calls `/api/setup/finalize` (which binds the company chosen at approval
-#       time, #1748 P1 A) + installs/starts the systemd user unit → machine
-#       online. The operator never types a company UUID.
-#
-#   macOS currently stops after `daemon login` and prints the foreground
-#       `daemon run` command. LaunchAgent service management is intentionally
-#       not implied until the daemon implements that setup path.
+#       time, #1748 P1 A) + installs/starts the platform service where
+#       supported. macOS finalizes the long-term daemon credentials and prints an
+#       explicit foreground fallback; LaunchAgent management is intentionally
+#       not implied yet. The operator never types a company UUID.
 #
 # Argv contract (security): NO secrets in argv. The ONLY accepted flag is the
 # OPTIONAL, non-secret `--login-base-url <url>` — injected by the web "Add
@@ -79,16 +77,22 @@ done
 UNAME_S=$(uname -s)
 UNAME_M=$(uname -m)
 RUN_SETUP=0
+SETUP_MODE=systemd
 case "${UNAME_S}-${UNAME_M}" in
     Linux-x86_64)
         ASSET="guildos-daemon-linux-x86_64"
         RUN_SETUP=1
+        SETUP_MODE=systemd
         ;;
     Darwin-arm64|Darwin-aarch64)
         ASSET="guildos-daemon-darwin-arm64"
+        RUN_SETUP=1
+        SETUP_MODE=macos-foreground
         ;;
     Darwin-x86_64)
         ASSET="guildos-daemon-darwin-x86_64"
+        RUN_SETUP=1
+        SETUP_MODE=macos-foreground
         ;;
     *)
         printf 'unsupported platform: %s-%s (supports Linux x86_64, macOS arm64, macOS x86_64)\n' \
@@ -137,15 +141,13 @@ else
     printf 'Installed daemon to %s\n' "$DAEMON_BIN"
 fi
 
-# ---- chain Stage 1 (`daemon login`) then Linux Stage 2 (`daemon setup`) ----
+# ---- chain Stage 1 (`daemon login`) then Stage 2 (`daemon setup`) ----
 # The former `daemon install` (skeleton-config) step was folded into
 # `daemon login` (#1746): login self-bootstraps the identity, then pairs. We run
 # login + setup in the FOREGROUND (Architect Q3 ruling msg=03ae05ce) so the
-# operator completes Linux onboarding in ONE command — pair in the browser, then
-# setup finalizes + installs the systemd unit and the machine comes online (so
-# the web "Add machine" modal can auto-advance to "connected"). macOS does not
-# expose daemon setup yet, so the script fails open only by printing the
-# foreground run command after login succeeds.
+# operator completes onboarding in ONE command — pair in the browser, then setup
+# finalizes credentials. Linux setup also installs the systemd unit; macOS setup
+# currently finalizes and then prints an explicit foreground fallback.
 #
 # Each stage runs under `set +e` + an explicit exit-code check: under `set -e` a
 # non-zero stage would abort on that line BEFORE its recovery hint could print,
@@ -175,16 +177,14 @@ if [ "$login_rc" -ne 0 ]; then
 fi
 
 if [ "$RUN_SETUP" -ne 1 ]; then
-    cat <<'MAC_NEXT_STEPS'
+    cat <<'NEXT_STEPS'
 
 guildos-daemon installed and paired.
 
-Start it in this terminal with:
-       $HOME/.guildos/daemon/daemon run
+Run daemon setup before starting the daemon:
+       $HOME/.guildos/daemon/daemon setup
 
-Keep that process running to maintain the machine connection.
-
-MAC_NEXT_STEPS
+NEXT_STEPS
     exit 0
 fi
 
@@ -199,13 +199,35 @@ printf 'Chaining to Stage 2 (`daemon setup`) ...\n'
 setup_rc=$?
 set -e
 if [ "$setup_rc" -ne 0 ]; then
-    cat <<'SETUP_FAIL'
+    if [ "$SETUP_MODE" = "systemd" ]; then
+        cat <<'SETUP_FAIL'
 
 Setup did not complete. Re-run it, then check the service:
        $HOME/.guildos/daemon/daemon setup
        systemctl --user status guildos-daemon
 SETUP_FAIL
+    else
+        cat <<'SETUP_FAIL'
+
+Setup did not complete. Re-run it before starting the daemon:
+       $HOME/.guildos/daemon/daemon setup
+SETUP_FAIL
+    fi
     exit 6
+fi
+
+if [ "$SETUP_MODE" = "macos-foreground" ]; then
+    cat <<'NEXT_STEPS'
+
+✓ guildos-daemon installed, paired, and finalized.
+
+macOS service auto-start is not available yet. Start it in this terminal with:
+       $HOME/.guildos/daemon/daemon run
+
+Keep that process running to maintain the machine connection.
+
+NEXT_STEPS
+    exit 0
 fi
 
 cat <<'NEXT_STEPS'
