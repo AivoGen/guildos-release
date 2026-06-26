@@ -119,13 +119,52 @@ else
     DOWNLOAD_URL="https://github.com/AivoGen/guildos-release/releases/download/${RELEASE_TAG}/${ASSET}"
 fi
 
-# ---- binary-presence idempotency gate (Architect Q4 ruling msg=03ae05ce) ----
-# Skip download iff the canonical binary is already present. We do NOT inspect
-# systemd / PID / pgrep here — service-manager concerns live in `daemon setup`
-# (systemd lifecycle); `daemon login` is idempotent on the machine identity.
-if [ -e "$DAEMON_BIN" ]; then
-    printf 'Daemon binary already present at %s — skipping download.\n' "$DAEMON_BIN"
+# ---- binary reuse gate -------------------------------------------------------
+parse_semver() {
+    printf '%s\n' "$1" | sed -n 's/^[^0-9]*\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*$/\1 \2 \3/p'
+}
+
+semver_ge() {
+    have_parts=$(parse_semver "$1")
+    want_parts=$(parse_semver "$2")
+    [ -n "$have_parts" ] && [ -n "$want_parts" ] || return 1
+    set -- $have_parts $want_parts
+    have_major=$1; have_minor=$2; have_patch=$3
+    want_major=$4; want_minor=$5; want_patch=$6
+    [ "$have_major" -gt "$want_major" ] && return 0
+    [ "$have_major" -lt "$want_major" ] && return 1
+    [ "$have_minor" -gt "$want_minor" ] && return 0
+    [ "$have_minor" -lt "$want_minor" ] && return 1
+    [ "$have_patch" -ge "$want_patch" ]
+}
+
+resolve_latest_release_tag() {
+    latest_url="https://github.com/AivoGen/guildos-release/releases/latest"
+    effective_url=$(curl -fsIL -o /dev/null -w '%{url_effective}' "$latest_url" 2>/dev/null || true)
+    printf '%s\n' "$effective_url" | sed -n 's#.*/releases/tag/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*[^/?#]*\).*#\1#p'
+}
+
+if [ "$RELEASE_TAG" = "latest" ]; then
+    TARGET_VERSION="$(resolve_latest_release_tag)"
 else
+    TARGET_VERSION="$RELEASE_TAG"
+fi
+
+daemon_reusable() {
+    [ -x "$DAEMON_BIN" ] || return 1
+    [ -n "$TARGET_VERSION" ] || return 1
+    local_version=$("$DAEMON_BIN" --version 2>/dev/null || true)
+    semver_ge "$local_version" "$TARGET_VERSION" || return 1
+    "$DAEMON_BIN" setup --help >/dev/null 2>&1 || return 1
+    return 0
+}
+
+if daemon_reusable; then
+    printf 'Daemon binary at %s is current and supports setup — skipping download.\n' "$DAEMON_BIN"
+else
+    if [ -e "$DAEMON_BIN" ]; then
+        printf 'Daemon binary at %s is old, unparseable, or lacks setup — replacing it.\n' "$DAEMON_BIN"
+    fi
     TMP_BIN=$(mktemp "$DAEMON_DIR/daemon.tmp.XXXXXXXX")
     trap 'rm -f "$TMP_BIN"' EXIT INT TERM HUP
 

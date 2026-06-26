@@ -85,6 +85,12 @@ UNAME_EOF
 make_curl_planter() {
     cat >"$SANDBOX/bin/curl" <<CURL_EOF
 #!/bin/sh
+for arg in "\$@"; do
+    if [ "\$arg" = "-w" ]; then
+        printf 'https://github.com/AivoGen/guildos-release/releases/tag/v0.61.40'
+        exit 0
+    fi
+done
 printf '%s\n' "\$@" > "$SANDBOX/curl_log/argv"
 out_path=""
 url=""
@@ -99,6 +105,13 @@ printf '%s\n' "\$url" > "$SANDBOX/curl_log/url"
 if [ -n "\$out_path" ]; then
     cat >"\$out_path" <<'DAEMON_PAYLOAD'
 #!/bin/sh
+if [ "\${1:-}" = "--version" ]; then
+    printf 'guildos-daemon 0.61.40\n'
+    exit 0
+fi
+if [ "\${1:-}" = "setup" ] && [ "\${2:-}" = "--help" ]; then
+    exit 0
+fi
 printf '%s\n' "\$*" >> "$SANDBOX/daemon_calls"
 [ "\$1" = "\${FAKE_DAEMON_FAIL_CMD:-}" ] && exit 9
 exit 0
@@ -114,9 +127,19 @@ CURL_EOF
 # FAKE_DAEMON_FAIL_CMD.
 plant_fake_daemon() {
     target_dir="$1"
+    version="${2:-0.61.40}"
+    supports_setup="${3:-yes}"
     mkdir -p "$target_dir"
     cat >"$target_dir/daemon" <<DAEMON_EOF
 #!/bin/sh
+if [ "\${1:-}" = "--version" ]; then
+    printf 'guildos-daemon %s\n' "$version"
+    exit 0
+fi
+if [ "\${1:-}" = "setup" ] && [ "\${2:-}" = "--help" ]; then
+    [ "$supports_setup" = "yes" ] && exit 0
+    exit 2
+fi
 printf '%s\n' "\$*" >> "$SANDBOX/daemon_calls"
 [ "\$1" = "\${FAKE_DAEMON_FAIL_CMD:-}" ] && exit 9
 exit 0
@@ -230,9 +253,28 @@ assert_not_contains "T2.3 URL does NOT contain /latest/" "/latest/" "$(cat "$SAN
 teardown_sandbox
 
 # ============================================================================
-# T3: idempotency — binary already present → skip curl, still chains login+setup
+# T3: stale binary present → replace it, then chain login+setup
 # ============================================================================
-printf '\nT3: idempotency (binary already present)\n'
+printf '\nT3: stale binary is replaced before login/setup\n'
+make_sandbox; make_uname_fake; make_curl_planter
+plant_fake_daemon "$SANDBOX/home/.guildos/daemon" "0.60.0" "yes"
+set +e
+INSTALL_OUT="$(HOME="$SANDBOX/home" PATH="$(sandbox_path)" \
+    GUILDOS_DAEMON_RELEASE_TAG="v0.61.40" sh "$INSTALL_SH" 2>&1)"
+INSTALL_RC=$?
+set -e
+assert_eq "T3.1 exit code 0" "0" "$INSTALL_RC"
+assert_contains "T3.2 curl invoked to replace stale binary" \
+    "releases/download/v0.61.40/guildos-daemon-linux-x86_64" "$(cat "$SANDBOX/curl_log/url")"
+assert_eq "T3.3 chain order is exactly login then setup" "login setup" \
+    "$(awk '{print $1}' "$SANDBOX/daemon_calls" | tr '\n' ' ' | sed 's/ $//')"
+assert_contains "T3.4 prints replacement message" "replacing it" "$INSTALL_OUT"
+teardown_sandbox
+
+# ============================================================================
+# T3b: reusable binary present → skip curl, still chain login+setup
+# ============================================================================
+printf '\nT3b: current binary with setup support is reused\n'
 make_sandbox; make_uname_fake
 cat >"$SANDBOX/bin/curl" <<CURL_EOF
 #!/bin/sh
@@ -240,13 +282,102 @@ touch "$SANDBOX/curl_log/INVOKED"
 exit 0
 CURL_EOF
 chmod +x "$SANDBOX/bin/curl"
-plant_fake_daemon "$SANDBOX/home/.guildos/daemon"
-run_install_sh
-assert_eq "T3.1 exit code 0" "0" "$INSTALL_RC"
-assert_file_absent "T3.2 curl NOT invoked when binary present" "$SANDBOX/curl_log/INVOKED"
-assert_eq "T3.3 chain order is exactly login then setup" "login setup" \
+plant_fake_daemon "$SANDBOX/home/.guildos/daemon" "0.61.40" "yes"
+set +e
+INSTALL_OUT="$(HOME="$SANDBOX/home" PATH="$(sandbox_path)" \
+    GUILDOS_DAEMON_RELEASE_TAG="v0.61.40" sh "$INSTALL_SH" 2>&1)"
+INSTALL_RC=$?
+set -e
+assert_eq "T3b.1 exit code 0" "0" "$INSTALL_RC"
+assert_file_absent "T3b.2 curl NOT invoked when version+setup are current" "$SANDBOX/curl_log/INVOKED"
+assert_eq "T3b.3 chain order is exactly login then setup" "login setup" \
     "$(awk '{print $1}' "$SANDBOX/daemon_calls" | tr '\n' ' ' | sed 's/ $//')"
-assert_contains "T3.4 prints skip message" "already present" "$INSTALL_OUT"
+assert_contains "T3b.4 prints skip message" "skipping download" "$INSTALL_OUT"
+teardown_sandbox
+
+# ============================================================================
+# T3c: binary lacks setup → replace even when version is current
+# ============================================================================
+printf '\nT3c: current binary without setup is replaced\n'
+make_sandbox; make_uname_fake; make_curl_planter
+plant_fake_daemon "$SANDBOX/home/.guildos/daemon" "0.61.40" "no"
+set +e
+INSTALL_OUT="$(HOME="$SANDBOX/home" PATH="$(sandbox_path)" \
+    GUILDOS_DAEMON_RELEASE_TAG="v0.61.40" sh "$INSTALL_SH" 2>&1)"
+INSTALL_RC=$?
+set -e
+assert_eq "T3c.1 exit code 0" "0" "$INSTALL_RC"
+assert_contains "T3c.2 curl invoked when setup subcommand is absent" \
+    "releases/download/v0.61.40/guildos-daemon-linux-x86_64" "$(cat "$SANDBOX/curl_log/url")"
+teardown_sandbox
+
+# ============================================================================
+# T3d: numeric compare, not lexicographic (`0.100.0` >= `0.99.0`)
+# ============================================================================
+printf '\nT3d: semver compare is numeric\n'
+make_sandbox; make_uname_fake
+cat >"$SANDBOX/bin/curl" <<CURL_EOF
+#!/bin/sh
+touch "$SANDBOX/curl_log/INVOKED"
+exit 0
+CURL_EOF
+chmod +x "$SANDBOX/bin/curl"
+plant_fake_daemon "$SANDBOX/home/.guildos/daemon" "0.100.0" "yes"
+set +e
+INSTALL_OUT="$(HOME="$SANDBOX/home" PATH="$(sandbox_path)" \
+    GUILDOS_DAEMON_RELEASE_TAG="v0.99.0" sh "$INSTALL_SH" 2>&1)"
+INSTALL_RC=$?
+set -e
+assert_eq "T3d.1 exit code 0" "0" "$INSTALL_RC"
+assert_file_absent "T3d.2 curl NOT invoked for numerically newer binary" "$SANDBOX/curl_log/INVOKED"
+assert_eq "T3d.3 chain order is exactly login then setup" "login setup" \
+    "$(awk '{print $1}' "$SANDBOX/daemon_calls" | tr '\n' ' ' | sed 's/ $//')"
+teardown_sandbox
+
+# ============================================================================
+# T3e: default latest cannot resolve concrete semver → fail closed to download
+# ============================================================================
+printf '\nT3e: unresolved latest tag downloads instead of skipping\n'
+make_sandbox; make_uname_fake
+cat >"$SANDBOX/bin/curl" <<CURL_EOF
+#!/bin/sh
+for arg in "\$@"; do
+    if [ "\$arg" = "-w" ]; then
+        exit 0
+    fi
+done
+out_path=""
+url=""
+while [ \$# -gt 0 ]; do
+    case "\$1" in
+        -o) out_path="\$2"; shift 2 ;;
+        --*|-*) shift ;;
+        *)  url="\$1"; shift ;;
+    esac
+done
+printf '%s\n' "\$url" > "$SANDBOX/curl_log/url"
+if [ -n "\$out_path" ]; then
+    cat >"\$out_path" <<'DAEMON_PAYLOAD'
+#!/bin/sh
+if [ "\${1:-}" = "--version" ]; then
+    printf 'guildos-daemon 0.61.40\n'
+    exit 0
+fi
+if [ "\${1:-}" = "setup" ] && [ "\${2:-}" = "--help" ]; then
+    exit 0
+fi
+printf '%s\n' "\$*" >> "$SANDBOX/daemon_calls"
+exit 0
+DAEMON_PAYLOAD
+fi
+exit 0
+CURL_EOF
+chmod +x "$SANDBOX/bin/curl"
+plant_fake_daemon "$SANDBOX/home/.guildos/daemon" "0.61.40" "yes"
+run_install_sh
+assert_eq "T3e.1 exit code 0" "0" "$INSTALL_RC"
+assert_contains "T3e.2 latest URL downloaded when target version unresolved" \
+    "releases/latest/download/guildos-daemon-linux-x86_64" "$(cat "$SANDBOX/curl_log/url")"
 teardown_sandbox
 
 # ============================================================================
@@ -464,6 +595,13 @@ assert_not_contains "T13.8 PS1 success path must not tell operators to foregroun
 assert_contains "T13.9 BAT transparently forwards installer arguments to PS1" "%*" "$BAT_BODY"
 assert_contains "T13.10 BAT bootstrap enables TLS 1.2" "Tls12" "$BAT_BODY"
 assert_contains "T13.11 BAT bootstrap download is terminating" "-ErrorAction Stop" "$BAT_BODY"
+assert_contains "T13.12 PS1 checks Administrator before download/login/setup" "Test-IsAdministrator" "$PS1_BODY"
+assert_contains "T13.13 PS1 admin failure gives clear instruction" "Administrator PowerShell" "$PS1_BODY"
+assert_contains "T13.14 PS1 resolves latest tag before reuse decision" "Resolve-LatestReleaseTag" "$PS1_BODY"
+assert_contains "T13.15 PS1 uses numeric semver comparison" "Test-SemverGreaterOrEqual" "$PS1_BODY"
+assert_contains "T13.16 PS1 probes setup capability before reuse" "setup --help" "$PS1_BODY"
+assert_contains "T13.17 BAT checks elevation before PS1 download" "net session" "$BAT_BODY"
+assert_contains "T13.18 BAT admin failure gives clear instruction" "Administrator PowerShell or Command Prompt" "$BAT_BODY"
 
 # ============================================================================
 # Summary
