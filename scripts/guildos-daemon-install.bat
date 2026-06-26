@@ -1,6 +1,12 @@
 @echo off
 setlocal
 
+net session >nul 2>&1
+if not "%ERRORLEVEL%"=="0" (
+  echo Administrator privileges are required. Re-run this installer from an Administrator PowerShell or Command Prompt.
+  exit /b 7
+)
+
 set "SCRIPT=%TEMP%\guildos-daemon-install.ps1"
 set "URL=https://github.com/AivoGen/guildos-release/releases/latest/download/guildos-daemon-install.ps1"
 if not "%GUILDOS_DAEMON_INSTALL_PS1_URL%"=="" set "URL=%GUILDOS_DAEMON_INSTALL_PS1_URL%"
