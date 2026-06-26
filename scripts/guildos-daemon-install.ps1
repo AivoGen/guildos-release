@@ -57,11 +57,11 @@ function Test-SemverGreaterOrEqual([string]$Have, [string]$Want) {
 
 function Resolve-LatestReleaseTag {
     try {
-        $response = Invoke-WebRequest -UseBasicParsing -Method Head -Uri "https://github.com/AivoGen/guildos-release/releases/latest" -MaximumRedirection 5 -ErrorAction Stop
-        $effective = $response.BaseResponse.ResponseUri.AbsoluteUri
-        $match = [regex]::Match($effective, '/releases/tag/(v\d+\.\d+\.\d+[^/?#]*)')
-        if ($match.Success) {
-            return $match.Groups[1].Value
+        $response = Invoke-WebRequest -UseBasicParsing -Uri "https://api.github.com/repos/AivoGen/guildos-release/releases/latest" -Headers @{ "Accept" = "application/vnd.github+json" } -ErrorAction Stop
+        $payload = $response.Content | ConvertFrom-Json
+        $tag = [string]$payload.tag_name
+        if ($tag -match '^v\d+\.\d+\.\d+[^/?#]*$') {
+            return $tag
         }
     } catch {
         return ""
@@ -127,7 +127,7 @@ if (Test-DaemonReusable $daemonBin $targetVersion) {
     Write-Host "Daemon binary at $daemonBin is current and supports setup - skipping download."
 } else {
     if (Test-Path -LiteralPath $daemonBin) {
-        Write-Host "Daemon binary at $daemonBin is old, unparseable, or lacks setup - replacing it."
+        Write-Host "Daemon binary at $daemonBin is old, unparseable, lacks setup, or target version could not be resolved - replacing it."
     }
     $tmp = Join-Path $daemonDir ("daemon.tmp." + [System.Guid]::NewGuid().ToString("N") + ".exe")
     try {

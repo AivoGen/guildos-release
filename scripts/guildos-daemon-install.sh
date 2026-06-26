@@ -163,7 +163,7 @@ if daemon_reusable; then
     printf 'Daemon binary at %s is current and supports setup — skipping download.\n' "$DAEMON_BIN"
 else
     if [ -e "$DAEMON_BIN" ]; then
-        printf 'Daemon binary at %s is old, unparseable, or lacks setup — replacing it.\n' "$DAEMON_BIN"
+        printf 'Daemon binary at %s is old, unparseable, lacks setup, or target version could not be resolved — replacing it.\n' "$DAEMON_BIN"
     fi
     TMP_BIN=$(mktemp "$DAEMON_DIR/daemon.tmp.XXXXXXXX")
     trap 'rm -f "$TMP_BIN"' EXIT INT TERM HUP
