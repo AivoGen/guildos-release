@@ -2,7 +2,7 @@
 setlocal
 
 net session >nul 2>&1
-if not "%ERRORLEVEL%"=="0" (
+if errorlevel 1 (
   echo Administrator privileges are required. Re-run this installer from an Administrator PowerShell or Command Prompt.
   exit /b 7
 )

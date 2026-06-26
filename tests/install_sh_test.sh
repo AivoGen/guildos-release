@@ -480,11 +480,12 @@ assert_contains "T13.10 BAT bootstrap enables TLS 1.2" "Tls12" "$BAT_BODY"
 assert_contains "T13.11 BAT bootstrap download is terminating" "-ErrorAction Stop" "$BAT_BODY"
 assert_contains "T13.12 PS1 checks Administrator before download/login/setup" "Test-IsAdministrator" "$PS1_BODY"
 assert_contains "T13.13 PS1 admin failure gives clear instruction" "Administrator PowerShell" "$PS1_BODY"
-assert_contains "T13.14 PS1 resolves latest tag before reuse decision" "Resolve-LatestReleaseTag" "$PS1_BODY"
+assert_contains "T13.14 PS1 resolves latest tag through GitHub API" "api.github.com/repos/AivoGen/guildos-release/releases/latest" "$PS1_BODY"
 assert_contains "T13.15 PS1 uses numeric semver comparison" "Test-SemverGreaterOrEqual" "$PS1_BODY"
 assert_contains "T13.16 PS1 probes setup capability before reuse" "setup --help" "$PS1_BODY"
-assert_contains "T13.17 BAT checks elevation before PS1 download" "net session" "$BAT_BODY"
+assert_contains "T13.17 BAT checks elevation with robust errorlevel" "if errorlevel 1" "$BAT_BODY"
 assert_contains "T13.18 BAT admin failure gives clear instruction" "Administrator PowerShell or Command Prompt" "$BAT_BODY"
+assert_not_contains "T13.19 PS1 latest resolution avoids BaseResponse" "BaseResponse" "$PS1_BODY"
 
 # ============================================================================
 # Summary
