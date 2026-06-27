@@ -347,41 +347,15 @@ assert_contains "T6b.3 platform error message" "unsupported platform" "$INSTALL_
 teardown_sandbox
 
 # ============================================================================
-# T6c: missing curl → manual download guidance before any curl-dependent work.
-# The PATH intentionally contains only fake uname, so `command -v curl` fails
-# before latest-tag resolution, mkdir/chmod, or binary download can run.
+# T6c/T10: recovery-path cases live in a sibling harness so this broad harness
+# stays below the touched-file line cap.
 # ============================================================================
-printf '\nT6c: missing curl prints manual recovery path\n'
-make_sandbox; make_uname_fake
-cat >"$SANDBOX/bin/xdg-open" <<OPEN_EOF
-#!/bin/sh
-printf '%s\n' "\$1" > "$SANDBOX/opened_url"
-exit 0
-OPEN_EOF
-chmod +x "$SANDBOX/bin/xdg-open"
+printf '\nT6c/T10: recovery split harness\n'
 set +e
-INSTALL_OUT="$(HOME="$SANDBOX/home" PATH="$SANDBOX/bin" "$HOST_SH" "$INSTALL_SH" 2>&1)"
-INSTALL_RC=$?
+sh "$TEST_DIR/install_sh_recovery_test.sh"
+recovery_rc=$?
 set -e
-assert_eq "T6c.1 exit code 4 when curl is missing" "4" "$INSTALL_RC"
-assert_contains "T6c.2 prints missing-curl explanation" "curl was not found" "$INSTALL_OUT"
-assert_contains "T6c.3 prints exact Linux asset basename" "guildos-daemon-linux-x86_64" "$INSTALL_OUT"
-assert_contains "T6c.4 prints concrete download URL" \
-    "releases/latest/download/guildos-daemon-linux-x86_64" "$INSTALL_OUT"
-assert_contains "T6c.5 prints helper page URL" \
-    "https://guildos.ai/daemon-install-help?asset=guildos-daemon-linux-x86_64" "$INSTALL_OUT"
-assert_eq "T6c.6 opens helper page with platform asset query" \
-    "https://guildos.ai/daemon-install-help?asset=guildos-daemon-linux-x86_64" \
-    "$(cat "$SANDBOX/opened_url")"
-assert_contains "T6c.7 prints chmod step with concrete daemon path" \
-    "chmod +x \"$SANDBOX/home/.guildos/daemon/daemon\"" "$INSTALL_OUT"
-assert_contains "T6c.8 prints login step" '$HOME/.guildos/daemon/daemon login' "$INSTALL_OUT"
-assert_contains "T6c.9 prints setup step" '$HOME/.guildos/daemon/daemon setup' "$INSTALL_OUT"
-assert_contains "T6c.10 prints daemon run fallback" '$HOME/.guildos/daemon/daemon run' "$INSTALL_OUT"
-assert_file_absent "T6c.11 no daemon binary created before manual path" \
-    "$SANDBOX/home/.guildos/daemon/daemon"
-assert_file_absent "T6c.12 no daemon calls when curl missing" "$SANDBOX/daemon_calls"
-teardown_sandbox
+assert_eq "T6c/T10.1 split harness exit code 0" "0" "$recovery_rc"
 
 # ============================================================================
 # T7: --login-base-url is parsed + forwarded to `daemon login` (#1748 P0 web
@@ -432,50 +406,6 @@ assert_eq "T9.1 exit code 5 on login failure" "5" "$INSTALL_RC"
 assert_contains "T9.2 prints reachable re-run-login hint (absolute path)" \
     '$HOME/.guildos/daemon/daemon login' "$INSTALL_OUT"
 assert_not_contains "T9.3 setup NOT chained after a failed login" "setup" "$(daemon_calls)"
-teardown_sandbox
-
-# ============================================================================
-# T10: setup failure after login → recoverable partial success (exit 0) with
-# setup retry, foreground run fallback, and service-manager hint.
-# ============================================================================
-printf '\nT10: setup failure is recoverable after login\n'
-make_sandbox; make_uname_fake
-plant_fake_daemon "$SANDBOX/home/.guildos/daemon"
-GUILDOS_DAEMON_RELEASE_TAG="v0.61.40"
-FAKE_DAEMON_FAIL_CMD="setup"; run_install_sh; FAKE_DAEMON_FAIL_CMD=""
-GUILDOS_DAEMON_RELEASE_TAG=""
-assert_eq "T10.1 exit code 0 on post-login setup failure" "0" "$INSTALL_RC"
-assert_contains "T10.2 login chained before setup failure" "login" "$(daemon_first_call)"
-assert_contains "T10.3 prints machine-added partial success" \
-    "The machine has been added" "$INSTALL_OUT"
-assert_contains "T10.4 prints setup exit code reason" \
-    "daemon setup exited with code 9" "$INSTALL_OUT"
-assert_contains "T10.5 prints reachable re-run-setup hint (absolute path)" \
-    '$HOME/.guildos/daemon/daemon setup' "$INSTALL_OUT"
-assert_contains "T10.6 prints foreground run fallback" \
-    '$HOME/.guildos/daemon/daemon run' "$INSTALL_OUT"
-assert_contains "T10.7 prints systemctl status recovery hint" \
-    "systemctl --user status" "$INSTALL_OUT"
-teardown_sandbox
-
-# T10b: macOS setup failure is also recoverable and avoids Linux service copy.
-printf '\nT10b: macOS setup failure is recoverable\n'
-make_sandbox; make_uname_macos_arm64
-plant_fake_daemon "$SANDBOX/home/.guildos/daemon"
-GUILDOS_DAEMON_RELEASE_TAG="v0.61.40"
-FAKE_DAEMON_FAIL_CMD="setup"; run_install_sh; FAKE_DAEMON_FAIL_CMD=""
-GUILDOS_DAEMON_RELEASE_TAG=""
-assert_eq "T10b.1 exit code 0 on post-login setup failure" "0" "$INSTALL_RC"
-assert_eq "T10b.2 macOS chains login then setup before failing" "login setup" \
-    "$(awk '{print $1}' "$SANDBOX/daemon_calls" | tr '\n' ' ' | sed 's/ $//')"
-assert_contains "T10b.3 prints setup exit code reason" \
-    "daemon setup exited with code 9" "$INSTALL_OUT"
-assert_contains "T10b.4 prints reachable setup retry" \
-    '$HOME/.guildos/daemon/daemon setup' "$INSTALL_OUT"
-assert_contains "T10b.5 prints foreground run fallback" \
-    '$HOME/.guildos/daemon/daemon run' "$INSTALL_OUT"
-assert_not_contains "T10b.6 macOS setup failure does not print systemctl" \
-    "systemctl --user status" "$INSTALL_OUT"
 teardown_sandbox
 
 # ============================================================================
