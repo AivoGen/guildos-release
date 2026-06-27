@@ -479,6 +479,10 @@ assert_contains "T13.20 PS1 setup failure preserves exit 0 after login success" 
 assert_contains "T13.21 PS1 setup failure offers callable setup retry" '& "$daemonBin" setup --daemon-binary "$daemonBin"' "$PS1_BODY"
 assert_contains "T13.22 PS1 setup failure offers callable foreground run fallback" '& "$daemonBin" run' "$PS1_BODY"
 assert_not_contains "T13.23 PS1 setup failure no longer exits 6" "Setup did not complete. Re-run from an elevated terminal" "$PS1_BODY"
+assert_contains "T13.24 PS1 has helper URL builder" "Get-DaemonInstallHelperUrl" "$PS1_BODY"
+assert_contains "T13.25 PS1 setup failure uses setup-service reason" "setup-service" "$PS1_BODY"
+assert_contains "T13.26 PS1 helper URL carries reason and asset only" 'daemon-install-help?reason=$encodedReason&asset=$encodedAsset' "$PS1_BODY"
+assert_contains "T13.27 PS1 setup failure opens helper page" "Start-Process" "$PS1_BODY"
 
 # ============================================================================
 # Summary

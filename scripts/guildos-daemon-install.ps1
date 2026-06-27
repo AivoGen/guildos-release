@@ -14,6 +14,31 @@ function Fail-WithExit([string]$Message, [int]$Code) {
     exit $Code
 }
 
+function Get-DaemonInstallHelperUrl([string]$Reason, [string]$Asset, [string]$LoginBaseUrl) {
+    if ([string]::IsNullOrWhiteSpace($LoginBaseUrl)) {
+        $helperBase = "https://guildos.ai"
+    } else {
+        $helperBase = $LoginBaseUrl.TrimEnd("/")
+    }
+    $encodedReason = [uri]::EscapeDataString($Reason)
+    $encodedAsset = [uri]::EscapeDataString($Asset)
+    return "$helperBase/daemon-install-help?reason=$encodedReason&asset=$encodedAsset"
+}
+
+function Show-InstallHelperPage([string]$Reason, [string]$Asset, [string]$LoginBaseUrl, [string]$Label) {
+    $helperUrl = Get-DaemonInstallHelperUrl $Reason $Asset $LoginBaseUrl
+    try {
+        Start-Process $helperUrl -ErrorAction Stop
+        Write-Host "Opened $Label helper page in your browser:"
+        Write-Host "       $helperUrl"
+        Write-Host ""
+    } catch {
+        Write-Host "Open this $Label helper page in your browser:"
+        Write-Host "       $helperUrl"
+        Write-Host ""
+    }
+}
+
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -153,6 +178,7 @@ Write-Host "Chaining to Stage 2 (daemon setup) ..."
 & $daemonBin setup --daemon-binary $daemonBin
 if ($LASTEXITCODE -ne 0) {
     $setupRc = $LASTEXITCODE
+    Show-InstallHelperPage "setup-service" $asset $LoginBaseUrl "setup recovery"
     @"
 
 guildos-daemon installed and paired. The machine has been added, but service setup did not complete.

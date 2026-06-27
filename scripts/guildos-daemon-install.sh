@@ -144,18 +144,25 @@ open_url() {
 }
 
 manual_helper_url() {
+    reason="$1"
     helper_base="${LOGIN_BASE_URL:-https://guildos.ai}"
     helper_base="${helper_base%/}"
-    printf '%s/daemon-install-help?asset=%s\n' "$helper_base" "$ASSET"
+    printf '%s/daemon-install-help?reason=%s&asset=%s\n' "$helper_base" "$reason" "$ASSET"
+}
+
+print_helper_page_hint() {
+    reason="$1"
+    label="$2"
+    helper_url="$(manual_helper_url "$reason")"
+    if open_url "$helper_url"; then
+        printf 'Opened %s helper page in your browser:\n       %s\n\n' "$label" "$helper_url"
+    else
+        printf 'Open this %s helper page in your browser:\n       %s\n\n' "$label" "$helper_url"
+    fi
 }
 
 print_manual_download_instructions() {
-    helper_url="$(manual_helper_url)"
-    if open_url "$helper_url"; then
-        printf 'Opened manual install helper page in your browser:\n       %s\n\n' "$helper_url"
-    else
-        printf 'Open this manual install helper page in your browser:\n       %s\n\n' "$helper_url"
-    fi
+    print_helper_page_hint "missing-curl" "manual install"
     printf '%s\n' "curl was not found, so the installer cannot download the daemon automatically.
 
 Manual install path for this machine:
@@ -305,6 +312,7 @@ setup_rc=$?
 set -e
 if [ "$setup_rc" -ne 0 ]; then
     if [ "$SETUP_MODE" = "systemd" ]; then
+        print_helper_page_hint "setup-service" "setup recovery" >&2
         cat <<'SETUP_FAIL_HEAD'
 
 guildos-daemon installed and paired. The machine has been added, but service setup did not complete.
@@ -321,6 +329,7 @@ If setup reported permission or service-manager errors, retry setup from a shell
        systemctl --user status guildos-daemon
 SETUP_FAIL_TAIL
     else
+        print_helper_page_hint "setup-service" "setup recovery" >&2
         cat <<'SETUP_FAIL_HEAD'
 
 guildos-daemon installed and paired. The machine has been added, but setup did not complete.
