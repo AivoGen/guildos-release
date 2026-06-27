@@ -154,9 +154,9 @@ assert_contains "R1.3 prints exact Linux asset basename" "guildos-daemon-linux-x
 assert_contains "R1.4 prints concrete download URL" \
     "releases/latest/download/guildos-daemon-linux-x86_64" "$INSTALL_OUT"
 assert_contains "R1.5 prints helper page URL" \
-    "https://guildos.ai/daemon-install-help?asset=guildos-daemon-linux-x86_64" "$INSTALL_OUT"
+    "https://guildos.ai/daemon-install-help?reason=missing-curl&asset=guildos-daemon-linux-x86_64" "$INSTALL_OUT"
 assert_eq "R1.6 opens helper page with platform asset query" \
-    "https://guildos.ai/daemon-install-help?asset=guildos-daemon-linux-x86_64" \
+    "https://guildos.ai/daemon-install-help?reason=missing-curl&asset=guildos-daemon-linux-x86_64" \
     "$(cat "$SANDBOX/opened_url")"
 assert_contains "R1.7 prints chmod step with concrete daemon path" \
     "chmod +x \"$SANDBOX/home/.guildos/daemon/daemon\"" "$INSTALL_OUT"
@@ -173,6 +173,12 @@ teardown_sandbox
 
 printf '\nR2: setup failure is recoverable after login\n'
 make_sandbox; make_uname_fake
+cat >"$SANDBOX/bin/xdg-open" <<OPEN_EOF
+#!/bin/sh
+printf '%s\n' "\$1" > "$SANDBOX/opened_url"
+exit 0
+OPEN_EOF
+chmod +x "$SANDBOX/bin/xdg-open"
 plant_fake_daemon "$SANDBOX/home/.guildos/daemon"
 GUILDOS_DAEMON_RELEASE_TAG="v0.61.40"
 FAKE_DAEMON_FAIL_CMD="setup"; run_install_sh; FAKE_DAEMON_FAIL_CMD=""
@@ -189,10 +195,21 @@ assert_contains "R2.6 prints foreground run fallback" \
     '$HOME/.guildos/daemon/daemon run' "$INSTALL_OUT"
 assert_contains "R2.7 prints systemctl status recovery hint" \
     "systemctl --user status" "$INSTALL_OUT"
+assert_contains "R2.8 prints setup-service helper URL" \
+    "https://guildos.ai/daemon-install-help?reason=setup-service&asset=guildos-daemon-linux-x86_64" "$INSTALL_OUT"
+assert_eq "R2.9 opens setup-service helper URL" \
+    "https://guildos.ai/daemon-install-help?reason=setup-service&asset=guildos-daemon-linux-x86_64" \
+    "$(cat "$SANDBOX/opened_url")"
 teardown_sandbox
 
 printf '\nR3: macOS setup failure is recoverable\n'
 make_sandbox; make_uname_macos_arm64
+cat >"$SANDBOX/bin/open" <<OPEN_EOF
+#!/bin/sh
+printf '%s\n' "\$1" > "$SANDBOX/opened_url"
+exit 0
+OPEN_EOF
+chmod +x "$SANDBOX/bin/open"
 plant_fake_daemon "$SANDBOX/home/.guildos/daemon"
 GUILDOS_DAEMON_RELEASE_TAG="v0.61.40"
 FAKE_DAEMON_FAIL_CMD="setup"; run_install_sh; FAKE_DAEMON_FAIL_CMD=""
@@ -207,6 +224,11 @@ assert_contains "R3.5 prints foreground run fallback" \
     '$HOME/.guildos/daemon/daemon run' "$INSTALL_OUT"
 assert_not_contains "R3.6 macOS setup failure does not print systemctl" \
     "systemctl --user status" "$INSTALL_OUT"
+assert_contains "R3.7 prints setup-service helper URL" \
+    "https://guildos.ai/daemon-install-help?reason=setup-service&asset=guildos-daemon-darwin-arm64" "$INSTALL_OUT"
+assert_eq "R3.8 opens setup-service helper URL" \
+    "https://guildos.ai/daemon-install-help?reason=setup-service&asset=guildos-daemon-darwin-arm64" \
+    "$(cat "$SANDBOX/opened_url")"
 teardown_sandbox
 
 printf '\n----\n'
