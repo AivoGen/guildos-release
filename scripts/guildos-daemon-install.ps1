@@ -161,8 +161,8 @@ Setup failure reason:
        daemon setup exited with code $setupRc. See the setup output above for details.
 
 Recovery options:
-       "$daemonBin" setup --daemon-binary "$daemonBin"
-       "$daemonBin" run
+       & "$daemonBin" setup --daemon-binary "$daemonBin"
+       & "$daemonBin" run
 
 If setup reported permission or service-manager errors, retry setup from an elevated terminal, then check the service:
        sc.exe query GuildOSDaemon

@@ -160,9 +160,12 @@ assert_eq "R1.6 opens helper page with platform asset query" \
     "$(cat "$SANDBOX/opened_url")"
 assert_contains "R1.7 prints chmod step with concrete daemon path" \
     "chmod +x \"$SANDBOX/home/.guildos/daemon/daemon\"" "$INSTALL_OUT"
-assert_contains "R1.8 prints login step" '$HOME/.guildos/daemon/daemon login' "$INSTALL_OUT"
-assert_contains "R1.9 prints setup step" '$HOME/.guildos/daemon/daemon setup' "$INSTALL_OUT"
-assert_contains "R1.10 prints daemon run fallback" '$HOME/.guildos/daemon/daemon run' "$INSTALL_OUT"
+assert_contains "R1.8 prints login step with concrete daemon path" \
+    "\"$SANDBOX/home/.guildos/daemon/daemon\" login" "$INSTALL_OUT"
+assert_contains "R1.9 prints setup step with concrete daemon path" \
+    "\"$SANDBOX/home/.guildos/daemon/daemon\" setup" "$INSTALL_OUT"
+assert_contains "R1.10 prints daemon run fallback with concrete daemon path" \
+    "\"$SANDBOX/home/.guildos/daemon/daemon\" run" "$INSTALL_OUT"
 assert_file_absent "R1.11 no daemon binary created before manual path" \
     "$SANDBOX/home/.guildos/daemon/daemon"
 assert_file_absent "R1.12 no daemon calls when curl missing" "$SANDBOX/daemon_calls"
