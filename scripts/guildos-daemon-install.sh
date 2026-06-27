@@ -140,6 +140,10 @@ open_url() {
         *) return 1 ;;
     esac
     command -v "$opener" >/dev/null 2>&1 || return 1
+    if [ "$opener" = "xdg-open" ] && command -v timeout >/dev/null 2>&1; then
+        timeout 5s "$opener" "$url" >/dev/null 2>&1
+        return $?
+    fi
     "$opener" "$url" >/dev/null 2>&1
 }
 

@@ -483,6 +483,9 @@ assert_contains "T13.24 PS1 has helper URL builder" "Get-DaemonInstallHelperUrl"
 assert_contains "T13.25 PS1 setup failure uses setup-service reason" "setup-service" "$PS1_BODY"
 assert_contains "T13.26 PS1 helper URL carries reason and asset only" 'daemon-install-help?reason=$encodedReason&asset=$encodedAsset' "$PS1_BODY"
 assert_contains "T13.27 PS1 setup failure opens helper page" "Start-Process" "$PS1_BODY"
+assert_contains "T13.28 PS1 helper URL defaults null reason before escaping" '$Reason = "manual-download"' "$PS1_BODY"
+assert_contains "T13.29 PS1 helper URL defaults null asset before escaping" '$Asset = "guildos-daemon-windows-x86_64.exe"' "$PS1_BODY"
+assert_contains "T13.30 POSIX xdg-open helper path is timeout-bounded" 'timeout 5s "$opener" "$url"' "$(cat scripts/guildos-daemon-install.sh)"
 
 # ============================================================================
 # Summary
