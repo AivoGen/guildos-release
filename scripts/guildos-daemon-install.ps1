@@ -152,7 +152,23 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Chaining to Stage 2 (daemon setup) ..."
 & $daemonBin setup --daemon-binary $daemonBin
 if ($LASTEXITCODE -ne 0) {
-    Fail-WithExit "Setup did not complete. Re-run from an elevated terminal: `"$daemonBin`" setup --daemon-binary `"$daemonBin`"" 6
+    $setupRc = $LASTEXITCODE
+    @"
+
+guildos-daemon installed and paired. The machine has been added, but service setup did not complete.
+
+Setup failure reason:
+       daemon setup exited with code $setupRc. See the setup output above for details.
+
+Recovery options:
+       "$daemonBin" setup --daemon-binary "$daemonBin"
+       "$daemonBin" run
+
+If setup reported permission or service-manager errors, retry setup from an elevated terminal, then check the service:
+       sc.exe query GuildOSDaemon
+
+"@ | Write-Host -ForegroundColor Yellow
+    exit 0
 }
 
 @"

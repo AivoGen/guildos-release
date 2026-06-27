@@ -101,13 +101,6 @@ case "${UNAME_S}-${UNAME_M}" in
         ;;
 esac
 
-# ---- canonical install paths (match design v2.5 §4.6.4) ----
-DAEMON_DIR="$HOME/.guildos/daemon"
-DAEMON_BIN="$DAEMON_DIR/daemon"
-
-mkdir -p "$DAEMON_DIR"
-chmod 700 "$DAEMON_DIR"
-
 # ---- release tag selection (latest by default; env override for test) ----
 # Architect Q2 ruling msg=03ae05ce: latest default, GUILDOS_DAEMON_RELEASE_TAG
 # env override for test/dogfood. Don't fold pin into argv — violates the
@@ -118,6 +111,71 @@ if [ "$RELEASE_TAG" = "latest" ]; then
 else
     DOWNLOAD_URL="https://github.com/AivoGen/guildos-release/releases/download/${RELEASE_TAG}/${ASSET}"
 fi
+
+# ---- canonical install paths (match design v2.5 §4.6.4) ----
+DAEMON_DIR="$HOME/.guildos/daemon"
+DAEMON_BIN="$DAEMON_DIR/daemon"
+
+print_login_command() {
+    if [ -n "$LOGIN_BASE_URL" ]; then
+        printf '       $HOME/.guildos/daemon/daemon login --login-base-url %s\n' "$LOGIN_BASE_URL"
+    else
+        printf '       $HOME/.guildos/daemon/daemon login\n'
+    fi
+}
+
+open_url() {
+    url="$1"
+    case "$UNAME_S" in
+        Darwin) opener="open" ;;
+        Linux) opener="xdg-open" ;;
+        *) return 1 ;;
+    esac
+    command -v "$opener" >/dev/null 2>&1 || return 1
+    "$opener" "$url" >/dev/null 2>&1
+}
+
+manual_helper_url() {
+    helper_base="${LOGIN_BASE_URL:-https://guildos.ai}"
+    helper_base="${helper_base%/}"
+    printf '%s/daemon-install-help?asset=%s\n' "$helper_base" "$ASSET"
+}
+
+print_manual_download_instructions() {
+    helper_url="$(manual_helper_url)"
+    if open_url "$helper_url"; then
+        printf 'Opened manual install helper page in your browser:\n       %s\n\n' "$helper_url"
+    else
+        printf 'Open this manual install helper page in your browser:\n       %s\n\n' "$helper_url"
+    fi
+    printf '%s\n' "curl was not found, so the installer cannot download the daemon automatically.
+
+Manual install path for this machine:
+       Asset: $ASSET
+       Download: $DOWNLOAD_URL
+
+After downloading the asset, place it at:
+       $DAEMON_BIN
+
+Then run:
+       mkdir -p \"$DAEMON_DIR\"
+       chmod 700 \"$DAEMON_DIR\"
+       mv \"/path/to/$ASSET\" \"$DAEMON_BIN\"
+       chmod +x \"$DAEMON_BIN\""
+    print_login_command
+    printf '%s\n' '       $HOME/.guildos/daemon/daemon setup
+
+If service setup is not available yet, keep the machine online with:
+       $HOME/.guildos/daemon/daemon run'
+}
+
+if ! command -v curl >/dev/null 2>&1; then
+    print_manual_download_instructions >&2
+    exit 4
+fi
+
+mkdir -p "$DAEMON_DIR"
+chmod 700 "$DAEMON_DIR"
 
 # ---- binary reuse gate -------------------------------------------------------
 parse_semver() {
@@ -239,20 +297,36 @@ setup_rc=$?
 set -e
 if [ "$setup_rc" -ne 0 ]; then
     if [ "$SETUP_MODE" = "systemd" ]; then
-        cat <<'SETUP_FAIL'
+        cat <<'SETUP_FAIL_HEAD'
 
-Setup did not complete. Re-run it, then check the service:
+guildos-daemon installed and paired. The machine has been added, but service setup did not complete.
+
+Setup failure reason:
+SETUP_FAIL_HEAD
+        printf '       daemon setup exited with code %s. See the setup output above for details.\n\n' "$setup_rc"
+        cat <<'SETUP_FAIL_TAIL'
+Recovery options:
        $HOME/.guildos/daemon/daemon setup
+       $HOME/.guildos/daemon/daemon run
+
+If setup reported permission or service-manager errors, retry setup from a shell with access to the user systemd session, then check the service:
        systemctl --user status guildos-daemon
-SETUP_FAIL
+SETUP_FAIL_TAIL
     else
-        cat <<'SETUP_FAIL'
+        cat <<'SETUP_FAIL_HEAD'
 
-Setup did not complete. Re-run it before starting the daemon:
+guildos-daemon installed and paired. The machine has been added, but setup did not complete.
+
+Setup failure reason:
+SETUP_FAIL_HEAD
+        printf '       daemon setup exited with code %s. See the setup output above for details.\n\n' "$setup_rc"
+        cat <<'SETUP_FAIL_TAIL'
+Recovery options:
        $HOME/.guildos/daemon/daemon setup
-SETUP_FAIL
+       $HOME/.guildos/daemon/daemon run
+SETUP_FAIL_TAIL
     fi
-    exit 6
+    exit 0
 fi
 
 if [ "$SETUP_MODE" = "macos-foreground" ]; then
