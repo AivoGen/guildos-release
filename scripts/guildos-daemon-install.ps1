@@ -15,6 +15,12 @@ function Fail-WithExit([string]$Message, [int]$Code) {
 }
 
 function Get-DaemonInstallHelperUrl([string]$Reason, [string]$Asset, [string]$LoginBaseUrl) {
+    if ([string]::IsNullOrWhiteSpace($Reason)) {
+        $Reason = "manual-download"
+    }
+    if ([string]::IsNullOrWhiteSpace($Asset)) {
+        $Asset = "guildos-daemon-windows-x86_64.exe"
+    }
     if ([string]::IsNullOrWhiteSpace($LoginBaseUrl)) {
         $helperBase = "https://guildos.ai"
     } else {
