@@ -476,8 +476,9 @@ assert_contains "T13.17 BAT checks elevation with robust errorlevel" "if errorle
 assert_contains "T13.18 BAT admin failure gives clear instruction" "Administrator PowerShell or Command Prompt" "$BAT_BODY"
 assert_not_contains "T13.19 PS1 latest resolution avoids BaseResponse" "BaseResponse" "$PS1_BODY"
 assert_contains "T13.20 PS1 setup failure preserves exit 0 after login success" "exit 0" "$PS1_BODY"
-assert_contains "T13.21 PS1 setup failure offers foreground run fallback" '"$daemonBin" run' "$PS1_BODY"
-assert_not_contains "T13.22 PS1 setup failure no longer exits 6" "Setup did not complete. Re-run from an elevated terminal" "$PS1_BODY"
+assert_contains "T13.21 PS1 setup failure offers callable setup retry" '& "$daemonBin" setup --daemon-binary "$daemonBin"' "$PS1_BODY"
+assert_contains "T13.22 PS1 setup failure offers callable foreground run fallback" '& "$daemonBin" run' "$PS1_BODY"
+assert_not_contains "T13.23 PS1 setup failure no longer exits 6" "Setup did not complete. Re-run from an elevated terminal" "$PS1_BODY"
 
 # ============================================================================
 # Summary

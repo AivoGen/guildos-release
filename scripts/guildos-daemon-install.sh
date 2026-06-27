@@ -124,6 +124,14 @@ print_login_command() {
     fi
 }
 
+print_manual_login_command() {
+    if [ -n "$LOGIN_BASE_URL" ]; then
+        printf '       "%s" login --login-base-url %s\n' "$DAEMON_BIN" "$LOGIN_BASE_URL"
+    else
+        printf '       "%s" login\n' "$DAEMON_BIN"
+    fi
+}
+
 open_url() {
     url="$1"
     case "$UNAME_S" in
@@ -162,11 +170,11 @@ Then run:
        chmod 700 \"$DAEMON_DIR\"
        mv \"/path/to/$ASSET\" \"$DAEMON_BIN\"
        chmod +x \"$DAEMON_BIN\""
-    print_login_command
-    printf '%s\n' '       $HOME/.guildos/daemon/daemon setup
+    print_manual_login_command
+    printf '       "%s" setup\n\n' "$DAEMON_BIN"
+    printf '%s\n' 'If service setup is not available yet, keep the machine online with:'
+    printf '       "%s" run\n' "$DAEMON_BIN"
 
-If service setup is not available yet, keep the machine online with:
-       $HOME/.guildos/daemon/daemon run'
 }
 
 if ! command -v curl >/dev/null 2>&1; then
