@@ -124,14 +124,6 @@ print_login_command() {
     fi
 }
 
-print_manual_login_command() {
-    if [ -n "$LOGIN_BASE_URL" ]; then
-        printf '       "%s" login --login-base-url %s\n' "$DAEMON_BIN" "$LOGIN_BASE_URL"
-    else
-        printf '       "%s" login\n' "$DAEMON_BIN"
-    fi
-}
-
 open_url() {
     url="$1"
     case "$UNAME_S" in
@@ -164,34 +156,6 @@ print_helper_page_hint() {
         printf 'Open this %s helper page in your browser:\n       %s\n\n' "$label" "$helper_url"
     fi
 }
-
-print_manual_download_instructions() {
-    print_helper_page_hint "missing-curl" "manual install"
-    printf '%s\n' "curl was not found, so the installer cannot download the daemon automatically.
-
-Manual install path for this machine:
-       Asset: $ASSET
-       Download: $DOWNLOAD_URL
-
-After downloading the asset, place it at:
-       $DAEMON_BIN
-
-Then run:
-       mkdir -p \"$DAEMON_DIR\"
-       chmod 700 \"$DAEMON_DIR\"
-       mv \"/path/to/$ASSET\" \"$DAEMON_BIN\"
-       chmod +x \"$DAEMON_BIN\""
-    print_manual_login_command
-    printf '       "%s" setup\n\n' "$DAEMON_BIN"
-    printf '%s\n' 'If service setup is not available yet, keep the machine online with:'
-    printf '       "%s" run\n' "$DAEMON_BIN"
-
-}
-
-if ! command -v curl >/dev/null 2>&1; then
-    print_manual_download_instructions >&2
-    exit 4
-fi
 
 mkdir -p "$DAEMON_DIR"
 chmod 700 "$DAEMON_DIR"

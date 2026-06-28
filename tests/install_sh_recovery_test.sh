@@ -136,8 +136,14 @@ assert_file_absent() {
     fi
 }
 
-printf '\nR1: missing curl prints manual recovery path\n'
+printf '\nR1: missing curl fails without manual helper UX\n'
 make_sandbox; make_uname_fake
+cat >"$SANDBOX/bin/curl" <<CURL_EOF
+#!/bin/sh
+printf '%s\n' 'fake-curl: command not found' >&2
+exit 127
+CURL_EOF
+chmod +x "$SANDBOX/bin/curl"
 cat >"$SANDBOX/bin/xdg-open" <<OPEN_EOF
 #!/bin/sh
 printf '%s\n' "\$1" > "$SANDBOX/opened_url"
@@ -145,30 +151,23 @@ exit 0
 OPEN_EOF
 chmod +x "$SANDBOX/bin/xdg-open"
 set +e
-INSTALL_OUT="$(HOME="$SANDBOX/home" PATH="$SANDBOX/bin" "$HOST_SH" "$INSTALL_SH" 2>&1)"
+INSTALL_OUT="$(HOME="$SANDBOX/home" PATH="$(sandbox_path)" "$HOST_SH" "$INSTALL_SH" 2>&1)"
 INSTALL_RC=$?
 set -e
-assert_eq "R1.1 exit code 4 when curl is missing" "4" "$INSTALL_RC"
-assert_contains "R1.2 prints missing-curl explanation" "curl was not found" "$INSTALL_OUT"
+assert_eq "R1.1 exit code 4 when curl download fails" "4" "$INSTALL_RC"
+assert_contains "R1.2 prints simple download failure" "download failed from" "$INSTALL_OUT"
 assert_contains "R1.3 prints exact Linux asset basename" "guildos-daemon-linux-x86_64" "$INSTALL_OUT"
 assert_contains "R1.4 prints concrete download URL" \
     "releases/latest/download/guildos-daemon-linux-x86_64" "$INSTALL_OUT"
-assert_contains "R1.5 prints helper page URL" \
-    "https://guildos.ai/daemon-install-help?reason=missing-curl&asset=guildos-daemon-linux-x86_64" "$INSTALL_OUT"
-assert_eq "R1.6 opens helper page with platform asset query" \
-    "https://guildos.ai/daemon-install-help?reason=missing-curl&asset=guildos-daemon-linux-x86_64" \
-    "$(cat "$SANDBOX/opened_url")"
-assert_contains "R1.7 prints chmod step with concrete daemon path" \
-    "chmod +x \"$SANDBOX/home/.guildos/daemon/daemon\"" "$INSTALL_OUT"
-assert_contains "R1.8 prints login step with concrete daemon path" \
-    "\"$SANDBOX/home/.guildos/daemon/daemon\" login" "$INSTALL_OUT"
-assert_contains "R1.9 prints setup step with concrete daemon path" \
-    "\"$SANDBOX/home/.guildos/daemon/daemon\" setup" "$INSTALL_OUT"
-assert_contains "R1.10 prints daemon run fallback with concrete daemon path" \
-    "\"$SANDBOX/home/.guildos/daemon/daemon\" run" "$INSTALL_OUT"
-assert_file_absent "R1.11 no daemon binary created before manual path" \
+assert_not_contains "R1.5 does not print missing-curl explanation" "curl was not found" "$INSTALL_OUT"
+assert_not_contains "R1.6 does not print missing-curl helper URL" \
+    "daemon-install-help?reason=missing-curl" "$INSTALL_OUT"
+assert_not_contains "R1.7 does not print manual install path" "Manual install path" "$INSTALL_OUT"
+assert_not_contains "R1.8 does not print manual download guidance" "After downloading the asset" "$INSTALL_OUT"
+assert_file_absent "R1.9 does not open helper page" "$SANDBOX/opened_url"
+assert_file_absent "R1.10 no daemon binary created before failed download" \
     "$SANDBOX/home/.guildos/daemon/daemon"
-assert_file_absent "R1.12 no daemon calls when curl missing" "$SANDBOX/daemon_calls"
+assert_file_absent "R1.11 no daemon calls when curl missing" "$SANDBOX/daemon_calls"
 teardown_sandbox
 
 printf '\nR2: setup failure is recoverable after login\n'
