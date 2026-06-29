@@ -94,10 +94,30 @@ function Get-GitHubReleaseHeaders([string]$ReleaseRepo) {
     return $headers
 }
 
+function Get-GitHubAssetHeaders([string]$ReleaseRepo) {
+    if ($ReleaseRepo -ne "AivoGen/guildos-release") {
+        $headers = @{ "Accept" = "application/octet-stream" }
+        if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
+            $headers["Authorization"] = "Bearer $($env:GITHUB_TOKEN)"
+        }
+        return $headers
+    }
+    return @{}
+}
+
+function Get-GitHubReleasePayload([string]$ReleaseRepo, [string]$ReleaseTag) {
+    if ([string]::IsNullOrWhiteSpace($ReleaseTag)) {
+        $uri = "https://api.github.com/repos/$ReleaseRepo/releases/latest"
+    } else {
+        $uri = "https://api.github.com/repos/$ReleaseRepo/releases/tags/$ReleaseTag"
+    }
+    $response = Invoke-WebRequest -UseBasicParsing -Uri $uri -Headers (Get-GitHubReleaseHeaders $ReleaseRepo) -ErrorAction Stop
+    return $response.Content | ConvertFrom-Json
+}
+
 function Resolve-LatestReleaseTag([string]$ReleaseRepo) {
     try {
-        $response = Invoke-WebRequest -UseBasicParsing -Uri "https://api.github.com/repos/$ReleaseRepo/releases/latest" -Headers (Get-GitHubReleaseHeaders $ReleaseRepo) -ErrorAction Stop
-        $payload = $response.Content | ConvertFrom-Json
+        $payload = Get-GitHubReleasePayload $ReleaseRepo ""
         $tag = [string]$payload.tag_name
         if ($tag -match '^v\d+\.\d+\.\d+[^/?#]*$') {
             return $tag
@@ -106,6 +126,21 @@ function Resolve-LatestReleaseTag([string]$ReleaseRepo) {
         return ""
     }
     return ""
+}
+
+function Resolve-DaemonDownloadUrl([string]$ReleaseRepo, [string]$ReleaseTag, [string]$Asset) {
+    if ($ReleaseRepo -eq "AivoGen/guildos-release") {
+        if ([string]::IsNullOrWhiteSpace($ReleaseTag)) {
+            return "https://github.com/$ReleaseRepo/releases/latest/download/$Asset"
+        }
+        return "https://github.com/$ReleaseRepo/releases/download/$ReleaseTag/$Asset"
+    }
+    $payload = Get-GitHubReleasePayload $ReleaseRepo $ReleaseTag
+    $assetInfo = @($payload.assets | Where-Object { $_.name -eq $Asset } | Select-Object -First 1)
+    if ($assetInfo.Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$assetInfo[0].url)) {
+        Fail-WithExit "release asset not found in $ReleaseRepo`: $Asset" 4
+    }
+    return [string]$assetInfo[0].url
 }
 
 function Test-DaemonReusable([string]$DaemonBin, [string]$TargetVersion) {
@@ -163,11 +198,11 @@ if ($releaseRepo -ne "AivoGen/guildos-release" -and $releaseRepo -ne "AivoGen/gu
 
 $releaseTag = $env:GUILDOS_DAEMON_RELEASE_TAG
 if ([string]::IsNullOrWhiteSpace($releaseTag)) {
-    $downloadUrl = "https://github.com/$releaseRepo/releases/latest/download/$asset"
     $targetVersion = Resolve-LatestReleaseTag $releaseRepo
+    $downloadUrl = Resolve-DaemonDownloadUrl $releaseRepo "" $asset
 } else {
-    $downloadUrl = "https://github.com/$releaseRepo/releases/download/$releaseTag/$asset"
     $targetVersion = $releaseTag
+    $downloadUrl = Resolve-DaemonDownloadUrl $releaseRepo $releaseTag $asset
 }
 
 if (Test-DaemonReusable $daemonBin $targetVersion) {
@@ -179,7 +214,7 @@ if (Test-DaemonReusable $daemonBin $targetVersion) {
     $tmp = Join-Path $daemonDir ("daemon.tmp." + [System.Guid]::NewGuid().ToString("N") + ".exe")
     try {
         Write-Host "Downloading $asset from $downloadUrl ..."
-        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -Headers (Get-GitHubReleaseHeaders $releaseRepo) -OutFile $tmp -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -Headers (Get-GitHubAssetHeaders $releaseRepo) -OutFile $tmp -ErrorAction Stop
         Move-Item -Force -LiteralPath $tmp -Destination $daemonBin
         Write-Host "Installed daemon to $daemonBin"
     } catch {
