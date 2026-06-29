@@ -84,7 +84,7 @@ run_install_sh() {
         PATH="$(sandbox_path)" \
         FAKE_DAEMON_FAIL_CMD="${FAKE_DAEMON_FAIL_CMD:-}" \
         GUILDOS_DAEMON_RELEASE_TAG="${GUILDOS_DAEMON_RELEASE_TAG:-}" \
-        sh "$INSTALL_SH" 2>&1
+        sh "$INSTALL_SH" "$@" 2>&1
     )"
     INSTALL_RC=$?
     set -e
@@ -135,6 +135,38 @@ assert_file_absent() {
         PASS_COUNT=$((PASS_COUNT + 1)); printf '  PASS %s\n' "$label"
     fi
 }
+
+printf '\nR0: private daemon repo selector uses env token\n'
+make_sandbox; make_uname_fake
+mkdir -p "$SANDBOX/curl_log"
+cat >"$SANDBOX/bin/curl" <<CURL_EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$SANDBOX/curl_log/argv"
+for arg in "\$@"; do
+    if [ "\$arg" = "-w" ]; then
+        printf 'https://github.com/AivoGen/guildos/releases/tag/v0.61.40'
+        exit 0
+    fi
+done
+exit 22
+CURL_EOF
+chmod +x "$SANDBOX/bin/curl"
+set +e
+INSTALL_OUT="$(
+    HOME="$SANDBOX/home" PATH="$(sandbox_path)" \
+    GUILDOS_DAEMON_RELEASE_REPO="AivoGen/guildos" GITHUB_TOKEN="test-token" \
+    "$HOST_SH" "$INSTALL_SH" 2>&1
+)"
+INSTALL_RC=$?
+set -e
+assert_eq "R0.1 private repo failed download exits 4" "4" "$INSTALL_RC"
+assert_contains "R0.2 latest lookup uses selected private repo" \
+    "github.com/AivoGen/guildos/releases/latest" "$(cat "$SANDBOX/curl_log/argv")"
+assert_contains "R0.3 download URL uses selected private repo" \
+    "github.com/AivoGen/guildos/releases/latest/download/guildos-daemon-linux-x86_64" "$(cat "$SANDBOX/curl_log/argv")"
+assert_contains "R0.4 private repo requests use bearer token header" \
+    "Authorization: Bearer test-token" "$(cat "$SANDBOX/curl_log/argv")"
+teardown_sandbox
 
 printf '\nR1: missing curl fails without manual helper UX\n'
 make_sandbox; make_uname_fake
@@ -195,9 +227,29 @@ assert_contains "R2.6 prints foreground run fallback" \
 assert_contains "R2.7 prints systemctl status recovery hint" \
     "systemctl --user status" "$INSTALL_OUT"
 assert_contains "R2.8 prints setup-service helper URL" \
-    "https://guildos.ai/daemon-install-help?reason=setup-service&asset=guildos-daemon-linux-x86_64" "$INSTALL_OUT"
+    "https://app.guildos.ai/daemon-install-help?reason=setup-service&asset=guildos-daemon-linux-x86_64" "$INSTALL_OUT"
 assert_eq "R2.9 opens setup-service helper URL" \
-    "https://guildos.ai/daemon-install-help?reason=setup-service&asset=guildos-daemon-linux-x86_64" \
+    "https://app.guildos.ai/daemon-install-help?reason=setup-service&asset=guildos-daemon-linux-x86_64" \
+    "$(cat "$SANDBOX/opened_url")"
+teardown_sandbox
+
+printf '\nR2b: setup helper preserves injected login base URL\n'
+make_sandbox; make_uname_fake
+cat >"$SANDBOX/bin/xdg-open" <<OPEN_EOF
+#!/bin/sh
+printf '%s\n' "\$1" > "$SANDBOX/opened_url"
+exit 0
+OPEN_EOF
+chmod +x "$SANDBOX/bin/xdg-open"
+plant_fake_daemon "$SANDBOX/home/.guildos/daemon"
+GUILDOS_DAEMON_RELEASE_TAG="v0.61.40"
+FAKE_DAEMON_FAIL_CMD="setup"; run_install_sh --login-base-url "https://app.example.test"; FAKE_DAEMON_FAIL_CMD=""
+GUILDOS_DAEMON_RELEASE_TAG=""
+assert_eq "R2b.1 exit code 0 on post-login setup failure" "0" "$INSTALL_RC"
+assert_contains "R2b.2 helper URL uses injected origin" \
+    "https://app.example.test/daemon-install-help?reason=setup-service&asset=guildos-daemon-linux-x86_64" "$INSTALL_OUT"
+assert_eq "R2b.3 opens injected-origin helper URL" \
+    "https://app.example.test/daemon-install-help?reason=setup-service&asset=guildos-daemon-linux-x86_64" \
     "$(cat "$SANDBOX/opened_url")"
 teardown_sandbox
 
@@ -224,9 +276,9 @@ assert_contains "R3.5 prints foreground run fallback" \
 assert_not_contains "R3.6 macOS setup failure does not print systemctl" \
     "systemctl --user status" "$INSTALL_OUT"
 assert_contains "R3.7 prints setup-service helper URL" \
-    "https://guildos.ai/daemon-install-help?reason=setup-service&asset=guildos-daemon-darwin-arm64" "$INSTALL_OUT"
+    "https://app.guildos.ai/daemon-install-help?reason=setup-service&asset=guildos-daemon-darwin-arm64" "$INSTALL_OUT"
 assert_eq "R3.8 opens setup-service helper URL" \
-    "https://guildos.ai/daemon-install-help?reason=setup-service&asset=guildos-daemon-darwin-arm64" \
+    "https://app.guildos.ai/daemon-install-help?reason=setup-service&asset=guildos-daemon-darwin-arm64" \
     "$(cat "$SANDBOX/opened_url")"
 teardown_sandbox
 
