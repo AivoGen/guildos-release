@@ -32,11 +32,16 @@
 # origin the operator is signed into. Token + core URL never transit argv (the
 # legacy `--token <api_token>` was visible in process listings). When the flag
 # is omitted, `daemon login` falls back to the skeleton config default
-# (`[machine].login_base_url = "https://guildos.ai"`).
+# (`[machine].login_base_url = "https://app.guildos.ai"`).
 #
-# Env overrides (NON-DEFAULT test path; production uses `latest`):
+# Env overrides (NON-DEFAULT test path; production uses public latest):
+#   GUILDOS_DAEMON_RELEASE_REPO — release repo for daemon binary assets
+#                                 (default `AivoGen/guildos-release`; test
+#                                 environments use private `AivoGen/guildos`).
 #   GUILDOS_DAEMON_RELEASE_TAG  — pin a specific release tag (default `latest`).
 #                                 e.g. `GUILDOS_DAEMON_RELEASE_TAG=v0.60.0 sh install.sh`
+#   GITHUB_TOKEN                — optional existing local token for private repo
+#                                 downloads. Never pass it in argv.
 
 set -eu
 
@@ -105,11 +110,19 @@ esac
 # Architect Q2 ruling msg=03ae05ce: latest default, GUILDOS_DAEMON_RELEASE_TAG
 # env override for test/dogfood. Don't fold pin into argv — violates the
 # no-secrets-in-argv contract.
+RELEASE_REPO="${GUILDOS_DAEMON_RELEASE_REPO:-AivoGen/guildos-release}"
+case "$RELEASE_REPO" in
+    AivoGen/guildos-release|AivoGen/guildos) ;;
+    *)
+        printf 'error: unsupported GUILDOS_DAEMON_RELEASE_REPO: %s\n' "$RELEASE_REPO" >&2
+        exit 2
+        ;;
+esac
 RELEASE_TAG="${GUILDOS_DAEMON_RELEASE_TAG:-latest}"
 if [ "$RELEASE_TAG" = "latest" ]; then
-    DOWNLOAD_URL="https://github.com/AivoGen/guildos-release/releases/latest/download/${ASSET}"
+    DOWNLOAD_URL="https://github.com/${RELEASE_REPO}/releases/latest/download/${ASSET}"
 else
-    DOWNLOAD_URL="https://github.com/AivoGen/guildos-release/releases/download/${RELEASE_TAG}/${ASSET}"
+    DOWNLOAD_URL="https://github.com/${RELEASE_REPO}/releases/download/${RELEASE_TAG}/${ASSET}"
 fi
 
 # ---- canonical install paths (match design v2.5 §4.6.4) ----
@@ -141,7 +154,7 @@ open_url() {
 
 manual_helper_url() {
     reason="$1"
-    helper_base="${LOGIN_BASE_URL:-https://guildos.ai}"
+    helper_base="${LOGIN_BASE_URL:-https://app.guildos.ai}"
     helper_base="${helper_base%/}"
     printf '%s/daemon-install-help?reason=%s&asset=%s\n' "$helper_base" "$reason" "$ASSET"
 }
@@ -180,8 +193,12 @@ semver_ge() {
 }
 
 resolve_latest_release_tag() {
-    latest_url="https://github.com/AivoGen/guildos-release/releases/latest"
-    effective_url=$(curl -fsIL -o /dev/null -w '%{url_effective}' "$latest_url" 2>/dev/null || true)
+    latest_url="https://github.com/${RELEASE_REPO}/releases/latest"
+    if [ "$RELEASE_REPO" != "AivoGen/guildos-release" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
+        effective_url=$(curl -fsIL -H "Authorization: Bearer ${GITHUB_TOKEN}" -o /dev/null -w '%{url_effective}' "$latest_url" 2>/dev/null || true)
+    else
+        effective_url=$(curl -fsIL -o /dev/null -w '%{url_effective}' "$latest_url" 2>/dev/null || true)
+    fi
     printf '%s\n' "$effective_url" | sed -n 's#.*/releases/tag/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*[^/?#]*\).*#\1#p'
 }
 
@@ -210,7 +227,14 @@ else
     trap 'rm -f "$TMP_BIN"' EXIT INT TERM HUP
 
     printf 'Downloading %s from %s ...\n' "$ASSET" "$DOWNLOAD_URL"
-    if ! curl -fL --proto '=https' --tlsv1.2 -o "$TMP_BIN" "$DOWNLOAD_URL"; then
+    if [ "$RELEASE_REPO" != "AivoGen/guildos-release" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
+        curl_rc=0
+        curl -fL --proto '=https' --tlsv1.2 -H "Authorization: Bearer ${GITHUB_TOKEN}" -o "$TMP_BIN" "$DOWNLOAD_URL" || curl_rc=$?
+    else
+        curl_rc=0
+        curl -fL --proto '=https' --tlsv1.2 -o "$TMP_BIN" "$DOWNLOAD_URL" || curl_rc=$?
+    fi
+    if [ "$curl_rc" -ne 0 ]; then
         printf 'download failed from %s\n' "$DOWNLOAD_URL" >&2
         exit 4
     fi

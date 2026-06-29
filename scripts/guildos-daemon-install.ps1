@@ -22,7 +22,7 @@ function Get-DaemonInstallHelperUrl([string]$Reason, [string]$Asset, [string]$Lo
         $Asset = "guildos-daemon-windows-x86_64.exe"
     }
     if ([string]::IsNullOrWhiteSpace($LoginBaseUrl)) {
-        $helperBase = "https://guildos.ai"
+        $helperBase = "https://app.guildos.ai"
     } else {
         $helperBase = $LoginBaseUrl.TrimEnd("/")
     }
@@ -86,9 +86,17 @@ function Test-SemverGreaterOrEqual([string]$Have, [string]$Want) {
     return $true
 }
 
-function Resolve-LatestReleaseTag {
+function Get-GitHubReleaseHeaders([string]$ReleaseRepo) {
+    $headers = @{ "Accept" = "application/vnd.github+json" }
+    if ($ReleaseRepo -ne "AivoGen/guildos-release" -and -not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
+        $headers["Authorization"] = "Bearer $($env:GITHUB_TOKEN)"
+    }
+    return $headers
+}
+
+function Resolve-LatestReleaseTag([string]$ReleaseRepo) {
     try {
-        $response = Invoke-WebRequest -UseBasicParsing -Uri "https://api.github.com/repos/AivoGen/guildos-release/releases/latest" -Headers @{ "Accept" = "application/vnd.github+json" } -ErrorAction Stop
+        $response = Invoke-WebRequest -UseBasicParsing -Uri "https://api.github.com/repos/$ReleaseRepo/releases/latest" -Headers (Get-GitHubReleaseHeaders $ReleaseRepo) -ErrorAction Stop
         $payload = $response.Content | ConvertFrom-Json
         $tag = [string]$payload.tag_name
         if ($tag -match '^v\d+\.\d+\.\d+[^/?#]*$') {
@@ -145,12 +153,20 @@ $daemonDir = Join-Path $env:USERPROFILE ".guildos\daemon"
 $daemonBin = Join-Path $daemonDir "daemon.exe"
 New-Item -ItemType Directory -Force -Path $daemonDir | Out-Null
 
+$releaseRepo = $env:GUILDOS_DAEMON_RELEASE_REPO
+if ([string]::IsNullOrWhiteSpace($releaseRepo)) {
+    $releaseRepo = "AivoGen/guildos-release"
+}
+if ($releaseRepo -ne "AivoGen/guildos-release" -and $releaseRepo -ne "AivoGen/guildos") {
+    Fail-WithExit "unsupported GUILDOS_DAEMON_RELEASE_REPO: $releaseRepo" 2
+}
+
 $releaseTag = $env:GUILDOS_DAEMON_RELEASE_TAG
 if ([string]::IsNullOrWhiteSpace($releaseTag)) {
-    $downloadUrl = "https://github.com/AivoGen/guildos-release/releases/latest/download/$asset"
-    $targetVersion = Resolve-LatestReleaseTag
+    $downloadUrl = "https://github.com/$releaseRepo/releases/latest/download/$asset"
+    $targetVersion = Resolve-LatestReleaseTag $releaseRepo
 } else {
-    $downloadUrl = "https://github.com/AivoGen/guildos-release/releases/download/$releaseTag/$asset"
+    $downloadUrl = "https://github.com/$releaseRepo/releases/download/$releaseTag/$asset"
     $targetVersion = $releaseTag
 }
 
@@ -163,7 +179,7 @@ if (Test-DaemonReusable $daemonBin $targetVersion) {
     $tmp = Join-Path $daemonDir ("daemon.tmp." + [System.Guid]::NewGuid().ToString("N") + ".exe")
     try {
         Write-Host "Downloading $asset from $downloadUrl ..."
-        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $tmp -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -Headers (Get-GitHubReleaseHeaders $releaseRepo) -OutFile $tmp -ErrorAction Stop
         Move-Item -Force -LiteralPath $tmp -Destination $daemonBin
         Write-Host "Installed daemon to $daemonBin"
     } catch {
