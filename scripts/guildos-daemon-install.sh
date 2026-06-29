@@ -119,11 +119,6 @@ case "$RELEASE_REPO" in
         ;;
 esac
 RELEASE_TAG="${GUILDOS_DAEMON_RELEASE_TAG:-latest}"
-if [ "$RELEASE_TAG" = "latest" ]; then
-    DOWNLOAD_URL="https://github.com/${RELEASE_REPO}/releases/latest/download/${ASSET}"
-else
-    DOWNLOAD_URL="https://github.com/${RELEASE_REPO}/releases/download/${RELEASE_TAG}/${ASSET}"
-fi
 
 # ---- canonical install paths (match design v2.5 §4.6.4) ----
 DAEMON_DIR="$HOME/.guildos/daemon"
@@ -192,14 +187,90 @@ semver_ge() {
     [ "$have_patch" -ge "$want_patch" ]
 }
 
-resolve_latest_release_tag() {
-    latest_url="https://github.com/${RELEASE_REPO}/releases/latest"
-    if [ "$RELEASE_REPO" != "AivoGen/guildos-release" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
-        effective_url=$(curl -fsIL -H "Authorization: Bearer ${GITHUB_TOKEN}" -o /dev/null -w '%{url_effective}' "$latest_url" 2>/dev/null || true)
+release_api_url() {
+    if [ "$RELEASE_TAG" = "latest" ]; then
+        printf 'https://api.github.com/repos/%s/releases/latest\n' "$RELEASE_REPO"
     else
-        effective_url=$(curl -fsIL -o /dev/null -w '%{url_effective}' "$latest_url" 2>/dev/null || true)
+        printf 'https://api.github.com/repos/%s/releases/tags/%s\n' "$RELEASE_REPO" "$RELEASE_TAG"
     fi
-    printf '%s\n' "$effective_url" | sed -n 's#.*/releases/tag/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*[^/?#]*\).*#\1#p'
+}
+
+curl_release_metadata() {
+    out_path="$1"
+    api_url="$(release_api_url)"
+    if [ "$RELEASE_REPO" != "AivoGen/guildos-release" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
+        curl -fsSL --proto '=https' --tlsv1.2 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -o "$out_path" "$api_url"
+    else
+        curl -fsSL --proto '=https' --tlsv1.2 \
+            -H "Accept: application/vnd.github+json" \
+            -o "$out_path" "$api_url"
+    fi
+}
+
+extract_release_tag() {
+    sed -n 's/^[[:space:]]*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -1
+}
+
+extract_asset_api_url() {
+    asset_name="$1"
+    json_path="$2"
+    awk -v asset="$asset_name" '
+        /"assets"[[:space:]]*:/ { in_assets = 1 }
+        in_assets && /{/ { url = "" }
+        in_assets && /"url"[[:space:]]*:/ && $0 !~ /"browser_download_url"/ {
+            line = $0
+            sub(/^.*"url"[[:space:]]*:[[:space:]]*"/, "", line)
+            sub(/".*$/, "", line)
+            if (line ~ /^https:\/\/api[.]github[.]com\/repos\//) url = line
+        }
+        in_assets && /"name"[[:space:]]*:/ {
+            line = $0
+            sub(/^.*"name"[[:space:]]*:[[:space:]]*"/, "", line)
+            sub(/".*$/, "", line)
+            if (line == asset && url != "") {
+                print url
+                exit
+            }
+        }
+    ' "$json_path"
+}
+
+resolve_latest_release_tag() {
+    if [ "$RELEASE_REPO" != "AivoGen/guildos-release" ]; then
+        release_json=$(mktemp "$DAEMON_DIR/release.json.XXXXXXXX")
+        if curl_release_metadata "$release_json" >/dev/null 2>&1; then
+            extract_release_tag "$release_json"
+        fi
+        rm -f "$release_json"
+    else
+        latest_url="https://github.com/${RELEASE_REPO}/releases/latest"
+        effective_url=$(curl -fsIL -o /dev/null -w '%{url_effective}' "$latest_url" 2>/dev/null || true)
+        printf '%s\n' "$effective_url" | sed -n 's#.*/releases/tag/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*[^/?#]*\).*#\1#p'
+    fi
+}
+
+resolve_download_url() {
+    if [ "$RELEASE_REPO" = "AivoGen/guildos-release" ]; then
+        if [ "$RELEASE_TAG" = "latest" ]; then
+            printf 'https://github.com/%s/releases/latest/download/%s\n' "$RELEASE_REPO" "$ASSET"
+        else
+            printf 'https://github.com/%s/releases/download/%s/%s\n' "$RELEASE_REPO" "$RELEASE_TAG" "$ASSET"
+        fi
+        return 0
+    fi
+
+    release_json=$(mktemp "$DAEMON_DIR/release.json.XXXXXXXX")
+    if ! curl_release_metadata "$release_json"; then
+        rm -f "$release_json"
+        return 1
+    fi
+    asset_url="$(extract_asset_api_url "$ASSET" "$release_json")"
+    rm -f "$release_json"
+    [ -n "$asset_url" ] || return 1
+    printf '%s\n' "$asset_url"
 }
 
 if [ "$RELEASE_TAG" = "latest" ]; then
@@ -226,10 +297,22 @@ else
     TMP_BIN=$(mktemp "$DAEMON_DIR/daemon.tmp.XXXXXXXX")
     trap 'rm -f "$TMP_BIN"' EXIT INT TERM HUP
 
+    DOWNLOAD_URL="$(resolve_download_url)" || {
+        printf 'failed to resolve release asset %s from %s\n' "$ASSET" "$(release_api_url)" >&2
+        exit 4
+    }
     printf 'Downloading %s from %s ...\n' "$ASSET" "$DOWNLOAD_URL"
     if [ "$RELEASE_REPO" != "AivoGen/guildos-release" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
         curl_rc=0
-        curl -fL --proto '=https' --tlsv1.2 -H "Authorization: Bearer ${GITHUB_TOKEN}" -o "$TMP_BIN" "$DOWNLOAD_URL" || curl_rc=$?
+        curl -fL --proto '=https' --tlsv1.2 \
+            -H "Accept: application/octet-stream" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -o "$TMP_BIN" "$DOWNLOAD_URL" || curl_rc=$?
+    elif [ "$RELEASE_REPO" != "AivoGen/guildos-release" ]; then
+        curl_rc=0
+        curl -fL --proto '=https' --tlsv1.2 \
+            -H "Accept: application/octet-stream" \
+            -o "$TMP_BIN" "$DOWNLOAD_URL" || curl_rc=$?
     else
         curl_rc=0
         curl -fL --proto '=https' --tlsv1.2 -o "$TMP_BIN" "$DOWNLOAD_URL" || curl_rc=$?

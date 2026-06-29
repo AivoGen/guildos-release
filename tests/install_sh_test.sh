@@ -474,7 +474,7 @@ assert_contains "T13.15 PS1 uses numeric semver comparison" "Test-SemverGreaterO
 assert_contains "T13.16 PS1 probes setup capability before reuse" "setup --help" "$PS1_BODY"
 assert_contains "T13.17 BAT checks elevation with robust errorlevel" "if errorlevel 1" "$BAT_BODY"
 assert_contains "T13.18 BAT admin failure gives clear instruction" "Administrator PowerShell or Command Prompt" "$BAT_BODY"
-assert_contains "T13.19 PS1 latest resolution passes repo-scoped headers" 'Get-GitHubReleaseHeaders $ReleaseRepo' "$PS1_BODY"
+assert_contains "T13.19 PS1 selects the named asset REST URL" '$assetInfo[0].url' "$PS1_BODY"
 assert_contains "T13.20 PS1 setup failure preserves exit 0 after login success" "exit 0" "$PS1_BODY"
 assert_contains "T13.21 PS1 setup failure offers callable setup retry" '& "$daemonBin" setup --daemon-binary "$daemonBin"' "$PS1_BODY"
 assert_contains "T13.22 PS1 setup failure offers callable foreground run fallback" '& "$daemonBin" run' "$PS1_BODY"
@@ -486,6 +486,8 @@ assert_contains "T13.27 PS1 setup failure opens helper page" "Start-Process" "$P
 assert_contains "T13.28 PS1 helper URL defaults null reason before escaping" '$Reason = "manual-download"' "$PS1_BODY"
 assert_contains "T13.29 PS1 helper URL defaults null asset before escaping" '$Asset = "guildos-daemon-windows-x86_64.exe"' "$PS1_BODY"
 assert_contains "T13.30 POSIX xdg-open helper path is timeout-bounded" 'timeout 5s "$opener" "$url"' "$(cat scripts/guildos-daemon-install.sh)"
+assert_contains "T13.31 PS1 private asset download requests bytes" "application/octet-stream" "$PS1_BODY"
+assert_contains "T13.32 PS1 private asset download uses asset headers" 'Get-GitHubAssetHeaders $releaseRepo' "$PS1_BODY"
 
 # ============================================================================
 # Summary

@@ -136,19 +136,68 @@ assert_file_absent() {
     fi
 }
 
-printf '\nR0: private daemon repo selector uses env token\n'
+printf '\nR0: private daemon repo selector uses REST asset endpoint\n'
 make_sandbox; make_uname_fake
 mkdir -p "$SANDBOX/curl_log"
 cat >"$SANDBOX/bin/curl" <<CURL_EOF
 #!/bin/sh
 printf '%s\n' "\$*" >> "$SANDBOX/curl_log/argv"
-for arg in "\$@"; do
-    if [ "\$arg" = "-w" ]; then
-        printf 'https://github.com/AivoGen/guildos/releases/tag/v0.61.40'
-        exit 0
-    fi
+out_path=""
+accept=""
+auth=""
+url=""
+while [ \$# -gt 0 ]; do
+    case "\$1" in
+        -o) out_path="\$2"; shift 2 ;;
+        -H)
+            case "\$2" in
+                Accept:*) accept="\$2" ;;
+                Authorization:*) auth="\$2" ;;
+            esac
+            shift 2
+            ;;
+        --*|-*) shift ;;
+        *) url="\$1"; shift ;;
+    esac
 done
-exit 22
+case "\$url" in
+    https://api.github.com/repos/AivoGen/guildos/releases/latest)
+        cat >"\$out_path" <<'JSON_EOF'
+{
+  "tag_name": "v0.61.40",
+  "assets": [
+    {
+      "url": "https://api.github.com/repos/AivoGen/guildos/releases/assets/123",
+      "name": "guildos-daemon-linux-x86_64",
+      "browser_download_url": "https://github.com/AivoGen/guildos/releases/latest/download/guildos-daemon-linux-x86_64"
+    }
+  ]
+}
+JSON_EOF
+        exit 0
+        ;;
+    https://github.com/AivoGen/guildos/releases/*/download/*)
+        exit 22
+        ;;
+    https://api.github.com/repos/AivoGen/guildos/releases/assets/123)
+        [ "\$accept" = "Accept: application/octet-stream" ] || exit 23
+        [ "\$auth" = "Authorization: Bearer test-token" ] || exit 24
+        cat >"\$out_path" <<'DAEMON_PAYLOAD'
+#!/bin/sh
+if [ "\${1:-}" = "--version" ]; then
+    printf 'guildos-daemon 0.61.40\n'
+    exit 0
+fi
+if [ "\${1:-}" = "setup" ] && [ "\${2:-}" = "--help" ]; then
+    exit 0
+fi
+printf '%s\n' "\$*" >> "$SANDBOX/daemon_calls"
+exit 0
+DAEMON_PAYLOAD
+        exit 0
+        ;;
+esac
+exit 25
 CURL_EOF
 chmod +x "$SANDBOX/bin/curl"
 set +e
@@ -159,13 +208,17 @@ INSTALL_OUT="$(
 )"
 INSTALL_RC=$?
 set -e
-assert_eq "R0.1 private repo failed download exits 4" "4" "$INSTALL_RC"
-assert_contains "R0.2 latest lookup uses selected private repo" \
-    "github.com/AivoGen/guildos/releases/latest" "$(cat "$SANDBOX/curl_log/argv")"
-assert_contains "R0.3 download URL uses selected private repo" \
-    "github.com/AivoGen/guildos/releases/latest/download/guildos-daemon-linux-x86_64" "$(cat "$SANDBOX/curl_log/argv")"
-assert_contains "R0.4 private repo requests use bearer token header" \
+assert_eq "R0.1 private repo install succeeds through REST asset URL" "0" "$INSTALL_RC"
+assert_contains "R0.2 latest lookup uses GitHub REST metadata" \
+    "api.github.com/repos/AivoGen/guildos/releases/latest" "$(cat "$SANDBOX/curl_log/argv")"
+assert_contains "R0.3 download uses named asset REST URL" \
+    "api.github.com/repos/AivoGen/guildos/releases/assets/123" "$(cat "$SANDBOX/curl_log/argv")"
+assert_contains "R0.4 private asset download uses octet-stream accept" \
+    "Accept: application/octet-stream" "$(cat "$SANDBOX/curl_log/argv")"
+assert_contains "R0.5 private repo requests use bearer token header" \
     "Authorization: Bearer test-token" "$(cat "$SANDBOX/curl_log/argv")"
+assert_not_contains "R0.6 private path does not use browser download URL" \
+    "github.com/AivoGen/guildos/releases/latest/download" "$(cat "$SANDBOX/curl_log/argv")"
 teardown_sandbox
 
 printf '\nR1: missing curl fails without manual helper UX\n'
